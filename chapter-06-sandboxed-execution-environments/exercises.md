@@ -130,7 +130,7 @@ Concepts used below are defined in the lesson (`README.md` in this directory) an
 
 **Difficulty:** Advanced
 
-**What you will do.** No code to run; this is the design exercise, and it is the closest to the interview question in the lesson. Write a one-page sandbox policy for a coding agent that serves untrusted users (not your own team), covering the five harms from the lesson.
+**What you will do.** No code to run; this is the design exercise, and it is the closest to the design-review question in the lesson. Write a one-page sandbox policy for a coding agent that serves untrusted users (not your own team), covering the five harms from the lesson.
 
 **Steps.**
 

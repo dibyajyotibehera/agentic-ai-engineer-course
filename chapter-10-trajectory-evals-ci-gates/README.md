@@ -376,7 +376,7 @@ regression the gate could not see.
 | 5% of traffic, at least 2,000 requests | Where a canary starts, and how much traffic a verdict needs | [LLMOps.si, LLM Deployment: CI/CD, staging and one-step rollback](https://www.llmops.si/articles/llm-deployment-ci-cd-staging-rollback/) |
 | Error ≤ stable × 1.2 + 0.001; p95 latency ≤ stable × 1.15; eval pass ≥ stable − 0.02; cost ≤ stable × 1.10 | The four canary checks | [LLMOps.si, LLM Deployment: CI/CD, staging and one-step rollback](https://www.llmops.si/articles/llm-deployment-ci-cd-staging-rollback/) |
 
-## The advanced-level interview angle
+## The advanced-level design-review angle
 
 The question this chapter prepares you for is not "how do you
 evaluate an agent", because any engineer who has read the
@@ -419,7 +419,7 @@ you raise the baseline and the improvement is visible to every
 reviewer. Those are the only three moves, and the discipline is in
 never reaching for a fourth.
 
-The last thing worth saying in an interview is what the gate costs,
+The last thing worth saying in a design review is what the gate costs,
 because an experienced engineer is expected to have done that
 arithmetic. The code graders are free and deterministic, the
 distance metrics are a few lines of Python, and a regression suite

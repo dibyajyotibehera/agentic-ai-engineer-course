@@ -15,8 +15,7 @@ of who said yes, is not a control at all — it is a pause button wired
 to nothing.
 
 The shape of the problem is easiest to see in the loop you already
-own. In Session 21 of the interview-prep track that this course was
-built around, the agent is a hand-built loop for a stock-price agent
+own. The example this course was built around is a hand-built loop for a stock-price agent
 with a human-approval gate on its write tool, alongside a bounded
 step loop, a hard token and cost budget, deterministic stops, a
 replay log, bounded error recovery, and the requirement that the loop
@@ -124,7 +123,7 @@ LangGraph documents interrupts in tools as a first-class pattern:
 the tool pauses for approval whenever it is called, the approval
 logic lives with the tool and is reusable across every graph that
 uses it, and the model calls the tool naturally without knowing a
-gate exists. This is the shape of the Session 21 gate — the write
+gate exists. This is the shape of the stock-price gate — the write
 tool itself refuses to run without an approval — and it is the shape
 you should reach for first, because it makes the gate impossible for
 the model to forget: the model does not decide to ask, the tool
@@ -172,7 +171,7 @@ control as the two production features that separate a prototype
 from a system
 ([Lesson 14: Microsoft Agent Framework](https://microsoft.github.io/ai-agents-for-beginners/14-microsoft-agent-framework/)).
 The choice between a checkpointer and a durable-execution runtime is
-a real architectural decision, and the interview angle at the end of
+a real architectural decision, and the design-review angle at the end of
 this chapter asks you to defend one, but the pause itself does not
 care which you chose: what it cares about is that the state is on
 disk before anyone is asked anything, that the identifier that finds
@@ -354,7 +353,7 @@ The audit trail maps to the same store your evaluation and guardrail
 results already land in, with the hash chain added as a column
 rather than a new system, so that the question "who approved this
 write?" is answerable from the same place as the question "what did
-the guardrail say about this run?". And the Session 21 gate itself —
+the guardrail say about this run?". And the stock-price gate itself —
 the human-approval gate on the write tool — is the place where all
 four mechanisms meet: the tool pauses, the pause is checkpointed,
 the approval is routed, the decision is recorded, and the write runs
@@ -362,9 +361,9 @@ exactly once or not at all. If you build only one thing from this
 chapter, build that gate in that shape, and let the rest of the
 chapter be the reasons why each of its properties is load-bearing.
 
-## The advanced-level interview angle
+## The advanced-level design-review angle
 
-Interviewers at an advanced level do not ask you to recite what a
+Reviewers at an advanced level do not ask you to recite what a
 human-in-the-loop system is. They ask you to defend one under
 pressure, and the pressure always takes the same three forms, so it
 is worth rehearsing the answers as a connected argument rather than

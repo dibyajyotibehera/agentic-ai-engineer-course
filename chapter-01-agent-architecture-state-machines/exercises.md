@@ -159,8 +159,7 @@ notes.)
 
 **Difficulty:** Advanced
 
-This is a design exercise, not a coding one, and it is the one to do in an
-interview-prep session. Take the triage system from Exercises 2 and 6 and
+This is a design exercise, not a coding one, and it is the one to do in a design review. Take the triage system from Exercises 2 and 6 and
 write a one-page failure-mode analysis covering these five scenarios, each
 with the failure, the defence, and what the operator sees:
 

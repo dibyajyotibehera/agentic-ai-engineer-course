@@ -295,7 +295,7 @@ loops forever or silently returns the least-broken draft it produced. The
 first is a colleague; the second is a liability.
 
 There is a final property the stopping rules give you, and it is the one
-that matters in an interview and in a design review alike: they make the
+that matters most in a design review: they make the
 loop's termination provable. A loop with a bounded number of attempts, a
 bounded wall-clock budget, and an early stop on a repeated signature
 terminates in all cases, because each iteration either succeeds, consumes
@@ -347,7 +347,7 @@ mechanism is a missing owner — every handoff feels like progress to
 the agent making it, because delegating *is* doing something — and its
 tell is the actor sequence, not the text: planner, researcher,
 planner, researcher, with the task itself unchanged underneath. The
-third is **oscillation**, which the interview angle above already
+third is **oscillation**, which the design-review angle above already
 names: attempt one fails with error A, attempt two fixes A and
 introduces error B, attempt three fixes B and reintroduces A, and the
 loop travels in a circle. Its mechanism is a repair that is too local
@@ -478,7 +478,7 @@ So far this chapter's loop has been a single line — generate, check,
 repair, repeat — and the runaway taxonomy above is the failure surface
 of that line. Two named planning patterns change the surface by
 changing the shape, and they are worth knowing because each one trades
-one failure mode for another, and a advanced-level answer names the
+one failure mode for another, and an advanced-level answer names the
 trade rather than just the pattern. The first is **ReWOO**, short for
 Reasoning WithOut Observation, published in 2023: instead
 of interleaving reasoning and tool calls, the planner writes the whole
@@ -597,15 +597,15 @@ window, the drafts merely rewording — and stops the spending, which
 is the difference between inference-time scaling as a strategy and
 inference-time scaling as a more expensive way to loop forever.
 
-### The advanced-level interview angle, extended
+### The advanced-level design-review angle, extended
 
-If the earlier interview angle was about the loop's cost and its
-breaks, this section adds the question the interviewer asks next,
+If the earlier design-review angle was about the loop's cost and its
+breaks, this section adds the question the reviewer asks next,
 which is usually some version of: "your agent has been running for
 ten minutes and produced nothing usable — what do you look at first?"
 Answer with the taxonomy, not with a shrug: name which of the five
 runaways the trajectory matches, say what its tell is, and say which
-instrument caught it, because a candidate who can say "the actor
+instrument caught it, because an engineer who can say "the actor
 sequence is planner, researcher, planner, researcher, so this is
 ping-pong delegation, and the fix is a single owner plus a rule that
 a handoff must carry the missing context or go to the user" is
@@ -642,10 +642,10 @@ without any numbers at all, in plain words a non-technical reviewer
 could follow. If you cannot do the second version, you do not yet
 understand the first.
 
-## The advanced-level interview angle
+## The advanced-level design-review angle
 
-If you are asked about self-correction in a advanced-level interview, the
-interviewer is rarely testing whether you know the pattern names; they are
+If you are asked about self-correction in a design review, the
+reviewer is rarely testing whether you know the pattern names; they are
 testing whether you understand what the loop costs and where it breaks, so
 answer in those terms. Start with the signal: say plainly that intrinsic
 self-correction does not work, cite the Huang result, and say that every
@@ -655,12 +655,12 @@ separates a design grounded in evidence from one grounded in optimism. Then
 talk about the loop as an economic object: each round costs a generation
 call, a critic call, an execution and a verification, so the cost of a task
 is the per-round cost multiplied by the number of rounds, and the number of
-rounds is the thing you control with the budget. A candidate who can say
+rounds is the thing you control with the budget. An engineer who can say
 "three rounds at roughly this cost each, so the worst case is this, and the
 loop stops early on a repeated signature" is answering a different and
 better question than one who says "the agent retries until it works".
 
-Then name the failure modes, because the interviewer will be waiting for
+Then name the failure modes, because the reviewer will be waiting for
 them. The first is the critic that shares the maker's blind spot: if the
 critic is the same model with the same prompt, it will approve the same
 mistakes, which is why the critic in this chapter runs tests rather than

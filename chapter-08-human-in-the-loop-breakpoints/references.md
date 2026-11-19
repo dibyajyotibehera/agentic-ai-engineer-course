@@ -88,7 +88,7 @@ from memory.
 ## Design guidance
 
 - **Anthropic — Building effective agents.** The framing this
-  chapter's interview angle draws on: agents begin with a command
+  chapter's design-review angle draws on: agents begin with a command
   from, or discussion with, the human user, and can pause for human
   feedback at checkpoints or when encountering blockers, with
   stopping conditions such as a maximum number of iterations to

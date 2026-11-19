@@ -12,7 +12,7 @@ Twelve chapters. Each chapter is a directory with the same four parts:
 
 | File | What it is |
 | --- | --- |
-| `README.md` | The lesson: the idea in plain words, the mechanism, the numbers that matter, and the advanced-level interview angle |
+| `README.md` | The lesson: the idea in plain words, the mechanism, the numbers that matter, and the advanced-level design-review angle |
 | `references.md` | Every source the lesson draws on, with a real, verified link |
 | `exercises.md` | Hands-on exercises with clear acceptance criteria and a stated difficulty |
 | `code/` | Starter code — Python notebooks and scripts in the style of the LLM course, runnable where feasible |
