@@ -1,0 +1,22 @@
+# Docker-in-Docker image — for trusted CI jobs ONLY. Do NOT use this
+# for agent-generated code.
+#
+# True Docker-in-Docker runs a second Docker daemon inside the
+# container, and it needs --privileged mode, which effectively gives
+# the container the keys to the host. The socket-binding variant
+# (-v /var/run/docker.sock:/var/run/docker.sock) is no safer: access
+# to a rootful Docker daemon is root-equivalent access to the host.
+#
+# Legitimate use: a CI job that builds container images, running on a
+# dedicated, disposable host you can rebuild. Never for untrusted code.
+# See the lesson and https://tiendu.github.io/2025/04/18/dind.html
+#
+# Build and run (disposable host only):
+#   docker build -t dind-demo:ch06 -f Dockerfile.dind .
+#   docker run --rm --privileged --name dind-demo dind-demo:ch06
+
+FROM docker:dind
+
+# The inner daemon stores its data on a volume so it does not write
+# into the container's overlay filesystem.
+VOLUME /var/lib/docker

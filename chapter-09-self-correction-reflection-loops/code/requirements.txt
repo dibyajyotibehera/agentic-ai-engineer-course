@@ -1,0 +1,2 @@
+# Standard library only — no third-party dependencies.
+# Python 3.11 or later.

@@ -1,0 +1,4 @@
+# Standard library only. No dependencies to install.
+# The exercises run with:  python demo_support_copilot.py
+# Stretch goals that need a real embedding model or Postgres are marked
+# as such in exercises.md.

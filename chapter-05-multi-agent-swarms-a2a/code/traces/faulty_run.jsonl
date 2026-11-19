@@ -1,0 +1,14 @@
+# Faulty run trace for Exercise 6.
+#
+# A triage run that produced a wrong reply: the customer was told their
+# renewal date was 14 March 2027, but the account record says
+# 14 March 2026. Work out from this trace alone which handoff introduced
+# the error and what kind of failure it was. One line per handoff, in the
+# same shape as Supervisor.trace_jsonl() in swarm.py.
+
+{"run_id": "run-tkt-1002-1793000000", "round": 1, "sender": "supervisor", "recipient": "researcher", "payload_type": "TicketState", "schema_version": 1, "checksum": "60d451a74d935d0cd13e33ba205bd53eae4f3990376f490cef704f5b70fa85d8", "status": "ok", "detail": "ticket tkt-1002 dispatched", "latency_s": 0.1}
+{"run_id": "run-tkt-1002-1793000000", "round": 1, "sender": "researcher", "recipient": "supervisor", "payload_type": "ResearchResult", "schema_version": 1, "checksum": "33a66396242966f5304766d3b0c849961baa4b8ec6c65fe1612762ae7f09c4a8", "status": "ok", "detail": "renewal_date=2026-03-14, plan=annual, source=account-db", "latency_s": 0.1}
+{"run_id": "run-tkt-1002-1793000000", "round": 1, "sender": "supervisor", "recipient": "policy-checker", "payload_type": "TicketState", "schema_version": 1, "checksum": "7db6bdd918681f92935375326b3055b1e1b0d4f51622471b8bf5bb76b6cf8091", "status": "ok", "detail": "ticket tkt-1002 dispatched", "latency_s": 0.1}
+{"run_id": "run-tkt-1002-1793000000", "round": 1, "sender": "policy-checker", "recipient": "supervisor", "payload_type": "PolicyResult", "schema_version": 1, "checksum": "b088ba074bc4eb6502fdf7e48d5388f264f8ed5030e418f7c9fd5f3a82d86447", "status": "ok", "detail": "priority=medium, policy=none", "latency_s": 0.1}
+{"run_id": "run-tkt-1002-1793000000", "round": 2, "sender": "supervisor", "recipient": "drafter", "payload_type": "TextSummary", "schema_version": 1, "checksum": "71200275b40f5dc4f4ee80082cde63fd8fef1900970a418f27e5a2602e57d3ff", "status": "ok", "detail": "supervisor summary: customer on annual plan, renews March 2027, no policy applies", "latency_s": 0.1}
+{"run_id": "run-tkt-1002-1793000000", "round": 2, "sender": "drafter", "recipient": "supervisor", "payload_type": "DraftResult", "schema_version": 1, "checksum": "a864bef47d8fc34bac7dc9b87a011ff5064070724d3d6d866ef0ad100dd8aebd", "status": "ok", "detail": "reply states renewal date 14 March 2027", "latency_s": 0.1}

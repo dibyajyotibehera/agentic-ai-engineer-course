@@ -1,0 +1,4 @@
+# Chapter 3 — Computer Use and GUI Automation
+playwright>=1.40
+Pillow>=10.0
+numpy>=1.24

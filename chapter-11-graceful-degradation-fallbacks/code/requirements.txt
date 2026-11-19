@@ -1,0 +1,1 @@
+# No third-party dependencies: Chapter 11 code uses the Python standard library only.

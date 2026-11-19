@@ -1,0 +1,61 @@
+# Trajectory evals as a continuous-integration gate.
+#
+# This workflow runs the chapter's eval suite on every push and pull
+# request that touches the agent, its prompts, or its evals, and it
+# fails the build when the gate fails. The gate itself lives in
+# code/ci_gate.py: it compares each criterion's pass rate against the
+# committed baseline in code/data/baseline.json, with a two-point
+# tolerance, and it fails outright when a critical case fails — the
+# refund-before-eligibility case in this chapter is one.
+#
+# Copy this file to .github/workflows/eval-gate.yml in your own
+# repository. The paths filter keeps unrelated changes from paying
+# for an eval run, and the eval report is uploaded as an artifact so
+# a failed build can show exactly which case and which criterion
+# regressed.
+#
+# Workflow syntax reference:
+# https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions
+
+name: eval-gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "chapter-10-trajectory-evals-ci-gates/**"
+      - "src/agent/**"
+      - "src/prompts/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "chapter-10-trajectory-evals-ci-gates/**"
+      - "src/agent/**"
+      - "src/prompts/**"
+
+jobs:
+  trajectory-evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r chapter-10-trajectory-evals-ci-gates/code/requirements.txt
+
+      - name: Run the eval suite
+        # ci_gate.py exits 1 when the gate fails, which fails this
+        # step and therefore the build. That is the whole point: a
+        # prompt or model change that regresses the evals cannot merge.
+        run: python chapter-10-trajectory-evals-ci-gates/code/ci_gate.py
+
+      - name: Upload the eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: chapter-10-trajectory-evals-ci-gates/code/eval_report.json

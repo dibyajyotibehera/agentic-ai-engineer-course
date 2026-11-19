@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+
+# Environment and secrets
+.env
+*.env
+
+# Generated run artefacts (exercises regenerate these)
+*.db
+*.sqlite3
+checkpoints.db
+temporal_event_log.json
+
+# OS
+.DS_Store
+Thumbs.db

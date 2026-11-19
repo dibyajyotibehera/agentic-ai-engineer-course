@@ -1,0 +1,9 @@
+# Chapter 5 has no third-party dependencies: the code runs on the Python
+# standard library only (Python 3.11 or later). No model API key and no
+# paid service is needed; the workers are deterministic stubs.
+#
+# Optional, for the production mapping discussed in the README:
+#   pydantic>=2.0   # typed payloads as validated models instead of
+#                   # dataclasses plus hand-written validators
+#   a2a-sdk         # the official Agent2Agent Python SDK, for exposing a
+#                   # worker as a real A2A server (pip install a2a-sdk)

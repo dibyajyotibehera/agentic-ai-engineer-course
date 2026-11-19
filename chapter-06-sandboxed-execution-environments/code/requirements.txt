@@ -1,0 +1,5 @@
+# Only the E2B SDK is a real dependency here, and only for Exercise 6.
+# Everything else in this chapter (sandbox_runner.py, egress_proxy.py,
+# the samples) uses the Python standard library only, so the core
+# exercises run with no installs at all.
+e2b>=2.0

@@ -1,0 +1,14 @@
+# Chapter 8 — Human-in-the-Loop & Breakpoints
+#
+# Standard library only. There is nothing to install: the durable
+# store is SQLite, the webhook endpoint is http.server, and the
+# Slack/Teams gates render JSON without any chat account.
+#
+# Optional, for the LangGraph mapping in the lesson text only:
+#   pip install langgraph
+# The chapter code does not import LangGraph; the interrupt,
+# checkpointer and Command pattern it teaches is implemented here
+# in framework-neutral Python so the pause, routing and audit
+# behaviour can be run and tested with no model and no API key.
+
+# (no dependencies)

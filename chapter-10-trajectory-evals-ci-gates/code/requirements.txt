@@ -1,0 +1,8 @@
+# No third-party dependencies: the core eval pipeline (trajectory
+# grading, golden DAGs, distance metrics, the CI gate and the
+# faithfulness arithmetic) runs on the Python standard library only,
+# so it works in any CI runner with nothing to install.
+#
+# Optional, for the real HHEM classifier stub in faithfulness.py:
+# transformers
+# torch
