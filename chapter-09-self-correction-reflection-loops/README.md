@@ -476,10 +476,7 @@ it falls even as the score climbs.
 
 So far this chapter's loop has been a single line — generate, check,
 repair, repeat — and the runaway taxonomy above is the failure surface
-of that line. Two named planning patterns change the surface by
-changing the shape, and they are worth knowing because each one trades
-one failure mode for another, and an advanced-level answer names the
-trade rather than just the pattern. The first is **ReWOO**, short for
+of that line. Two named planning patterns change the surface by changing the shape of the plan — from the single line to a whole plan written up front, or to a tree of branches that backtracks. Each one trades one failure mode for another, and an advanced-level answer names the trade rather than just the pattern. The first is **ReWOO**, short for
 Reasoning WithOut Observation, published in 2023: instead
 of interleaving reasoning and tool calls, the planner writes the whole
 plan up front — every tool call, with placeholders for results not yet
