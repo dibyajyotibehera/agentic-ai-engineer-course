@@ -478,7 +478,7 @@ So far this chapter's loop has been a single line — generate, check,
 repair, repeat — and the runaway taxonomy above is the failure surface
 of that line. Two named planning patterns change the surface by
 changing the shape, and they are worth knowing because each one trades
-one failure mode for another, and a principal-level answer names the
+one failure mode for another, and a advanced-level answer names the
 trade rather than just the pattern. The first is **ReWOO**, short for
 Reasoning WithOut Observation, published in 2023: instead
 of interleaving reasoning and tool calls, the planner writes the whole
@@ -583,7 +583,7 @@ already had a non-trivial chance of solving a question, extra
 test-time compute could let it outperform a model fourteen times
 larger, while on the hardest questions, where the small model's
 success rate was close to zero, extra compute added almost nothing
-and more pre-training was the better investment. The principal-level
+and more pre-training was the better investment. The advanced-level
 reading of that result is a budget rule you can state in one
 sentence: spend inference-time compute where the model is already
 close, because it amplifies capability that is present and does not
@@ -597,7 +597,7 @@ window, the drafts merely rewording — and stops the spending, which
 is the difference between inference-time scaling as a strategy and
 inference-time scaling as a more expensive way to loop forever.
 
-### The principal-level interview angle, extended
+### The advanced-level interview angle, extended
 
 If the earlier interview angle was about the loop's cost and its
 breaks, this section adds the question the interviewer asks next,
@@ -642,9 +642,9 @@ without any numbers at all, in plain words a non-technical reviewer
 could follow. If you cannot do the second version, you do not yet
 understand the first.
 
-## The principal-level interview angle
+## The advanced-level interview angle
 
-If you are asked about self-correction in a principal-level interview, the
+If you are asked about self-correction in a advanced-level interview, the
 interviewer is rarely testing whether you know the pattern names; they are
 testing whether you understand what the loop costs and where it breaks, so
 answer in those terms. Start with the signal: say plainly that intrinsic

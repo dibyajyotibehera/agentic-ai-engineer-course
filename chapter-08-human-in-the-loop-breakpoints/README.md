@@ -362,9 +362,9 @@ exactly once or not at all. If you build only one thing from this
 chapter, build that gate in that shape, and let the rest of the
 chapter be the reasons why each of its properties is load-bearing.
 
-## The principal-level interview angle
+## The advanced-level interview angle
 
-Interviewers at principal level do not ask you to recite what a
+Interviewers at an advanced level do not ask you to recite what a
 human-in-the-loop system is. They ask you to defend one under
 pressure, and the pressure always takes the same three forms, so it
 is worth rehearsing the answers as a connected argument rather than
@@ -402,7 +402,7 @@ the timeout, rather than waiting forever or — far worse — timing out
 into an approval.
 
 The third pressure is the trade-off question, and it is the one that
-separates a principal answer from a senior one: *when would you not
+separates an advanced answer from a senior one: *when would you not
 build this?* A gate on every tool call is a system that grinds to a
 halt, because every approval costs a human's attention and attention
 is the scarcest resource in the loop, so the real design work is
@@ -415,7 +415,7 @@ approvers start clicking Approve without reading, which is the point
 at which the gate has become theatre and the honest response is to
 narrow its scope until approvals are rare enough to be read. A gate
 that fires a hundred times a day is not a control; it is a
-notification stream with a button on it, and the principal's job is
+notification stream with a button on it, and the engineer's job is
 to notice that before the incident review does.
 
 ## What to run next

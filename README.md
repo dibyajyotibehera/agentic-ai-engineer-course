@@ -1,6 +1,6 @@
 # Agentic AI Engineer Course
 
-A hands-on course for building production-grade AI agents, in the style of [the LLM course](https://github.com/mlabonne/llm-course): each chapter is a lesson with theory, runnable code, exercises and references. It is written for an advanced practitioner — a principal engineer with production agentic-AI experience — not a beginner.
+A hands-on course for building production-grade AI agents, in the style of [the LLM course](https://github.com/mlabonne/llm-course): each chapter is a lesson with theory, runnable code, exercises and references. It is written for an advanced practitioner — an experienced engineer with production agentic-AI experience — not a beginner.
 
 ## Who this course is for
 
@@ -12,7 +12,7 @@ Twelve chapters. Each chapter is a directory with the same four parts:
 
 | File | What it is |
 | --- | --- |
-| `README.md` | The lesson: the idea in plain words, the mechanism, the numbers that matter, and the principal-level interview angle |
+| `README.md` | The lesson: the idea in plain words, the mechanism, the numbers that matter, and the advanced-level interview angle |
 | `references.md` | Every source the lesson draws on, with a real, verified link |
 | `exercises.md` | Hands-on exercises with clear acceptance criteria and a stated difficulty |
 | `code/` | Starter code — Python notebooks and scripts in the style of the LLM course, runnable where feasible |
@@ -48,7 +48,7 @@ pip install -r requirements.txt   # per-chapter requirements live in each chapte
 
 ## Where this course comes from
 
-A research pass over GitHub and the major course platforms (18 November 2026) found that no existing course covers even half of these twelve topics at advanced depth. The best base found was [Microsoft's AI Agents for Beginners](https://github.com/microsoft/ai-agents-for-beginners) (MIT licence, 18 lessons), which this course adapts with attribution where its material is used; the full conversion plan — what is adapted from where, and what is original writing — is in [CONVERSION_PLAN.md](CONVERSION_PLAN.md). Roughly half of this course is adapted material raised to principal-engineer depth, and roughly half is original, because the advanced half of every topic, and the whole of Chapters 6, 11 and 12, had no adequate source anywhere.
+A research pass over GitHub and the major course platforms (18 November 2026) found that no existing course covers even half of these twelve topics at advanced depth. The best base found was [Microsoft's AI Agents for Beginners](https://github.com/microsoft/ai-agents-for-beginners) (MIT licence, 18 lessons), which this course adapts with attribution where its material is used; the full conversion plan — what is adapted from where, and what is original writing — is in [CONVERSION_PLAN.md](CONVERSION_PLAN.md). Roughly half of this course is adapted material raised to advanced depth, and roughly half is original, because the advanced half of every topic, and the whole of Chapters 6, 11 and 12, had no adequate source anywhere.
 
 ## A note on the stack
 
