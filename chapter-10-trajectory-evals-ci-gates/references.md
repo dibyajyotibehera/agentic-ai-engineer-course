@@ -87,6 +87,15 @@ per-chapter provenance record.
   triggers, jobs, and steps):
   https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions
 
+## Harness engineering — verification as the completion rule
+
+- OpenAI, Harness engineering (the Codex harness article):
+  https://openai.com/index/harness-engineering/
+- Anthropic, Effective harnesses for long-running agents:
+  https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents
+- Anthropic, Harness design for long-running apps:
+  https://www.anthropic.com/engineering/harness-design-long-running-apps
+
 ## Background reading
 
 - Anthropic, Building effective agents (the evaluator–optimiser

@@ -21,6 +21,15 @@ Every link below was verified live on 18 November 2026, by opening the page or b
 - Anthropic, "Building effective agents", December 2024 — workflows versus agents, the five workflow patterns (prompt chaining, routing, parallelization, orchestrator-workers, evaluator-optimizer), and the guidance to start with the simplest solution and add complexity only when it demonstrably improves outcomes.
   <https://www.anthropic.com/engineering/building-effective-agents>
 
+## Harness engineering
+
+- OpenAI, "Harness engineering" — the harness as the code around the model: instructions, state, verification, scope and lifecycle; the million-line codebase experiment with roughly 1,500 pull requests over five months.
+  <https://openai.com/index/harness-engineering/>
+- Anthropic, "Effective harnesses for long-running agents" — the model as the reasoning engine and everything else as engineering around it; harness design for agents that run for hours.
+  <https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents>
+- Anthropic, "Harness design for long-running apps" — the Opus 4.5 retro-game comparison: 20 minutes and $9 bare versus 6 hours and $200 harnessed.
+  <https://www.anthropic.com/engineering/harness-design-long-running-apps>
+
 ## Durable execution (Temporal.io)
 
 - Temporal, "Understanding Temporal" — durable execution, workflows, activities, workers, task queues, the Temporal Service, and the event history as the durable log behind recovery by replay.

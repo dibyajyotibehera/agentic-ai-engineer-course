@@ -208,6 +208,85 @@ and that drift is the earliest warning you will get that the next
 regression is coming. A gate catches the regression that already
 happened; a distance trend catches the one that is forming.
 
+## The verification gap: when the agent says it is done
+
+Distance measures how far a run drifted from the golden path, and it
+does that job well, but it takes one thing for granted, which is that
+somebody already knows the run is finished. There is a failure that
+happens one step earlier than drift, and it is quieter, because it
+wears the shape of success: the agent declares the task complete
+when the work is not actually done. The refund copilot says the
+refund is issued while the eligibility check never ran, the coding
+agent says the function is fixed while the tests still fail, and in
+each case the trace ends with a confident claim of completion and
+nothing in the run contradicts it, because the only voice in the run
+is the agent's own. A grader that looks at the final state may still
+pass the run, and a distance metric may still score it as a near
+miss, so this failure needs a metric of its own, and that metric is
+the verification gap.
+
+The verification gap is the proportion of the agent's completion
+claims that turn out to be false, and it is measured directly, by
+counting. Take a small set of tasks, five is enough to start, and
+for each one record two facts separately: whether the agent claimed
+it was done, and whether the work was actually correct when checked
+by a test the agent did not write and did not choose. The gap is the
+number of false claims divided by the total number of claims, so if
+the agent claims completion on all five tasks and independent tests
+pass on three of them and fail on two, the gap is two divided by
+five, which is 0.40. Those numbers are a worked example, included
+to show the arithmetic, which is the whole method: two columns,
+claimed and verified, and one division. The one rule that makes the
+measurement honest is that the verification must be independent of
+the agent, because if the agent grades its own work, the gap
+measures the agent's confidence, and confidence is the wrong
+quantity: the measurement has to answer whether the work is
+correct, and only a check the agent did not write can answer that.
+Chapter 9 already showed why that signal fails: a model asked to
+check its own reasoning with no outside evidence does not get more
+accurate, it gets more confident.
+
+A high gap means the agent's word for "done" cannot be trusted, and
+that matters more than it sounds, because every consumer downstream
+of the agent treats "done" as a promise. The continuous integration
+(CI) gate treats it as a promise when it lets a change merge, the
+next agent in a chain treats it as a promise when it builds on the
+result, and the user treats it as a promise when they stop checking,
+so a gap of 0.40 means that two times in five, the promise is broken
+and nobody is told. A low gap on a small set of easy tasks proves
+very little, which is why the set has to include tasks the agent
+finds hard, and why the gap is a number to track over time rather
+than a number to quote once: if a prompt change moves the gap from
+0.10 to 0.30 while the pass rate stays flat, the change made the
+agent's completion claims less honest even though its answers look
+just as good, and the pass rate alone would never have shown it.
+
+What closes the gap is a change of who decides that the work is
+done, and the change is structural rather than a better prompt. The
+agent must run a verification command before it is allowed to claim
+completion, and the command must be fixed by the harness, which is
+the code around the model that runs tools, enforces rules, and
+decides what happens next. A test suite that exits with code zero, a
+checker script that confirms the refund matches its authorisation,
+a schema validator that accepts the output: these are verification
+commands, and the harness runs them and reads their result, so the
+completion signal comes from the command's result, with the model's
+judgement kept out of that decision entirely. This is the central
+idea of harness engineering, described in [OpenAI's Codex harness
+article](https://openai.com/index/harness-engineering/) and in
+[Anthropic's effective harnesses for long-running
+agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
+and [Anthropic's harness design for long-running
+apps](https://www.anthropic.com/engineering/harness-design-long-running-apps):
+the harness, not the model, owns the definition of done, and the
+model proposes while the harness verifies. The trace should record
+the evidence alongside the claim, naming the command that ran and
+the result it returned, so that a reviewer reading the trace can see
+the check that backs the claim rather than taking the claim on
+trust. And the gap itself belongs in the eval report next to the
+pass rates, because it is the one metric that answers the question
+the gate most needs answered, which is whether "done" means done.
+
 ## LLM-as-a-judge: the grader for what code cannot see
 
 Some things about a run cannot be decided by code at all. Whether
@@ -375,6 +454,7 @@ regression the gate could not see.
 | 2–3 points | The tolerance on an aggregate before the gate trips | Chapter worked example (verified facts, November 2026) |
 | 5% of traffic, at least 2,000 requests | Where a canary starts, and how much traffic a verdict needs | [LLMOps.si, LLM Deployment: CI/CD, staging and one-step rollback](https://www.llmops.si/articles/llm-deployment-ci-cd-staging-rollback/) |
 | Error ≤ stable × 1.2 + 0.001; p95 latency ≤ stable × 1.15; eval pass ≥ stable − 0.02; cost ≤ stable × 1.10 | The four canary checks | [LLMOps.si, LLM Deployment: CI/CD, staging and one-step rollback](https://www.llmops.si/articles/llm-deployment-ci-cd-staging-rollback/) |
+| 2 ÷ 5 = 0.40 | Verification gap on the chapter's worked example: five tasks, the agent claims completion on all five, independent tests pass on three | Chapter worked example |
 
 ## The advanced-level design-review angle
 

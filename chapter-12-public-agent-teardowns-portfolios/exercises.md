@@ -1,6 +1,6 @@
 # Chapter 12 — Exercises
 
-Six exercises. Do them in order: the first two build the two hardest parts of a teardown — an honest decision record and a measured latency profile — the third assembles them, with the cost analysis, into the capstone document, and the last three practise the skills the capstone does not cover on its own: rescuing an agent that has already broken, distilling a behaviour without letting it go stale, and watching cost while the agent runs. All six use the support copilot from the lesson (a ReAct loop resolving tickets through four Model Context Protocol tools: account state, subscription status, knowledge-base search, and refund eligibility, with LLM-as-a-judge evaluations as the production gate), or your own agent if you have one. No exercise needs a paid service: the code runs against a mock agent run, and the capstone is a document, not a deployment.
+Seven exercises. Do them in order: the first two build the two hardest parts of a teardown — an honest decision record and a measured latency profile — the third assembles them, with the cost analysis, into the capstone document, and the last four practise the skills the capstone does not cover on its own: rescuing an agent that has already broken, distilling a behaviour without letting it go stale, watching cost while the agent runs, and tearing down a harness. All six use the support copilot from the lesson (a ReAct loop resolving tickets through four Model Context Protocol tools: account state, subscription status, knowledge-base search, and refund eligibility, with LLM-as-a-judge evaluations as the production gate), or your own agent if you have one. No exercise needs a paid service: the code runs against a mock agent run, and the capstone is a document, not a deployment.
 
 ## Exercise 1 — Write an architecture decision record for a real past decision
 
@@ -99,3 +99,18 @@ Extend the cost-per-task calculator's attribution rollup in `code/cost_per_task.
 - One amplifier is measured as a multiplier on the mock traces, with a before-and-after price for the fix, each figure labelled as a worked calculation on illustrative token counts.
 
 **Stretch:** add a second conversation to the rollup, owned by a different team, and show that the per-team totals add up to the product total — the check that catches double-counting or a dropped tag before the bill does.
+
+## Exercise 7 — Tear down the harness of a tool you already use
+
+**Difficulty:** Intermediate.
+
+Pick one agent tool you already use every week — a coding agent in your editor, a command-line agent, or the support copilot from this course — and tear down its harness using the five-subsystem frame from the lesson: instructions, state, verification, scope, lifecycle. For each subsystem, write one paragraph stating what the harness lets the agent see, touch, and do, and what it forbids or hides, grounding each claim in one thing you have actually observed: a file the agent could not see, a rule it followed, a time it forgot earlier context, a check that caught its mistake, a task it refused. Then name the one design decision that defines the harness and what it trades away, the way the lesson does for the four production harnesses. Close by answering this: if this agent misbehaved tomorrow, which subsystem would you investigate first, and what evidence would confirm or rule it out?
+
+**Acceptance criteria:**
+
+- All five subsystems are covered, each with at least one observed behaviour, not a feature-list claim copied from documentation.
+- The defining decision is stated as a decision with a trade-off, naming what is given up, not only what is gained.
+- The closing answer names one subsystem to investigate first for a misbehaving agent, with the evidence that would confirm or rule it out.
+- No claim about the tool's internals that you have not observed or that is not in its public documentation; anything inferred is labelled as inferred.
+
+**Stretch:** repeat the teardown for a second tool and compare the two harnesses on one subsystem — for example, how each one handles state across sessions — and state which design you would borrow for your own agent and why.

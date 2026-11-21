@@ -210,3 +210,39 @@ eval pass rate 0.93, and cost per request $0.012:
 - The boundary note states a rule (inclusive or exclusive) and
   applies it consistently, rather than leaving the boundary
   undefined.
+
+## Exercise 7 — Measure the verification gap, then close it
+
+**Difficulty:** Intermediate.
+
+Take five small tasks the agent can plausibly get wrong — five
+short coding tasks with a test suite you wrote, or five
+refund-style tasks with a checker that confirms the outcome
+against the authorisation. Run the agent on each one, and for
+every task record two facts in a table: whether the agent claimed
+it was done, and whether the work was actually correct when you
+verified it independently, using tests or checks the agent did not
+write. Compute the verification gap as false completion claims
+divided by total completion claims, and write it as a fraction and
+a decimal.
+
+Then close the gap. Change the harness so the agent may only
+report completion after running a verification command that you
+fixed in advance — the test suite, or the checker — and only when
+that command succeeds. Record the command and its result in the
+trace next to the claim. Run the same five tasks again and compute
+the gap a second time.
+
+**Acceptance criteria:**
+
+- A table of the five tasks with a claimed column and a verified
+  column, and the gap stated as a fraction and a decimal for both
+  runs.
+- The verification is independent: the checks are ones the agent
+  did not write, and the verification command is fixed by the
+  harness rather than chosen by the agent.
+- The second run's gap is lower than the first, or a written
+  explanation of which false completion survived the gate and why.
+- One paragraph on what a high gap would mean for the CI gate:
+  which number in the gate report it would move, and why a pass
+  rate on its own would miss it.

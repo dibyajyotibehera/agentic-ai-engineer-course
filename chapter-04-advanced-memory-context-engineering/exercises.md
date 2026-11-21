@@ -1,6 +1,6 @@
 # Exercises — Chapter 4: Advanced Memory and Context Engineering
 
-Work in order. Exercises 1–2 build the store; Exercises 3–4 break it in the ways production breaks it; Exercise 5 turns the whole thing into money; Exercise 6 keeps a long run honest, working compaction, pruning, rot and lazy loading. All exercises run on the standard library only, using the deterministic stand-in embeddings in `code/memory_store.py` — no API key and no paid service is needed for the core exercises. Where an exercise has a stretch goal that needs a real embedding model or a running Postgres, the stretch goal says so explicitly.
+Work in order. Exercises 1–2 build the store; Exercises 3–4 break it in the ways production breaks it; Exercise 5 turns the whole thing into money; Exercise 6 keeps a long run honest, working compaction, pruning, rot and lazy loading. Exercise 7 applies progressive disclosure to the project's own documentation. All exercises run on the standard library only, using the deterministic stand-in embeddings in `code/memory_store.py` — no API key and no paid service is needed for the core exercises. Where an exercise has a stretch goal that needs a real embedding model or a running Postgres, the stretch goal says so explicitly.
 
 The running example throughout is a support copilot for a fictional software-as-a-service product: it answers refund, billing and outage questions for many tenants, and its memory must remember each tenant's plan and policies without ever mixing tenants up. The demo in `code/demo_support_copilot.py` wires the whole example together; read it before starting Exercise 1.
 
@@ -119,5 +119,22 @@ This exercise works the long-run defences from the last section of the lesson, u
 - The lazy run loads fewer tokens before the first tool call than the eager run, and you can name what was deferred and what would trigger retrieving it.
 
 **Stretch goal (design discussion, no code):** retrieval is returning the right memories and the model still ignores them or quotes the wrong one. That is the symptom Retrieval-Augmented Fine-Tuning (RAFT) is for (arXiv:2403.10131) — a training run, not a prompt change. Write one paragraph: what evidence from your own retrieval logs would you need before spending a training run on it, and what would you fix first if that evidence showed the retriever, not the model, was at fault?
+
+---
+
+## Exercise 7 — Progressive disclosure: write the map, then measure what it saves
+
+**Difficulty: Intermediate**
+
+Write an [AGENTS.md](../templates/AGENTS.md) index for the support copilot project, following the template in this course, and layer the project's documentation behind it: the index at the root, one short document per topic beneath it (architecture, memory tiers and budgets, tenant isolation, deployment), each no longer than a screen. Then measure the difference it makes. Build two prompts for the same task, fixing a tenant-isolation bug in the episodic tier: the first loads the whole documentation set into context, and the second loads only the index plus the one document the task touches, and count the tokens in each prompt with the token counter in `code/token_budget.py`.
+
+**Acceptance criteria**
+
+- The index fits on one screen and names, for every document behind it, what lives there and when to open it, with the build, test and lint commands the agent must use.
+- The layered prompt for the bug-fix task carries fewer than half the documentation tokens of the flat prompt, and the task still has everything it needs: the index, the tenant-isolation document, and a pointer to the episodic-tier document, with nothing else loaded.
+- You write down, in a short paragraph in your exercise notes, which document the task would have loaded next if the first fix attempt had failed, and what in the index would have told the agent to open it — an index that cannot answer that question is a table of contents, not a map.
+- No document behind the index is loaded into the prompt until a step names it: show the loading order in your notes, index first, detail on demand.
+
+**Stretch goal (design discussion, no code):** the same layering applies to tool schemas. Sketch, in a paragraph, how the support copilot would expose its tools if the agent first saw a one-line description of each tool and loaded the full schema only for the tool it was about to call, and name one task where that would save more than the documentation layering above, and one task where it would cost more.
 
 ---

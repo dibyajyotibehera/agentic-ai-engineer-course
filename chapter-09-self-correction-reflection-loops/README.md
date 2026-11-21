@@ -472,6 +472,8 @@ easier task, and only a separate relevance check catches that, which
 is why the watchdog tracks relevance on its own line and warns when
 it falls even as the score climbs.
 
+One more anchor against drift comes from the harness rather than the watchdog: the feature list in chapter 1. A feature list is a machine-readable file in which each feature is a triple — a behaviour description, a verification command, and a current state — and the state moves to passing only when the verification command succeeds. Drift is a loop reinterpreting its goal, and a goal written this way cannot be reinterpreted: the loop can reword its drafts, but it cannot reword the behaviour the verification command checks. So when the watchdog warns that relevance is falling, the first question is whether the loop is still working from the same feature list, and if the list changed, who changed it.
+
 ### Two planning patterns that change the failure surface: ReWOO and tree search
 
 So far this chapter's loop has been a single line — generate, check,

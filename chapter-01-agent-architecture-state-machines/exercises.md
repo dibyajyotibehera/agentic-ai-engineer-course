@@ -211,3 +211,36 @@ with a defence for each.
 - It maps each part of your system to this chapter's vocabulary (node,
   checkpoint, super-step, activity, event history, idempotency key) without
   forcing a mapping that does not fit — and says where the mapping breaks.
+
+## Exercise 9 — Drive a run from a feature list
+
+**Difficulty:** Intermediate
+
+This exercise makes the feature list concrete: you will write one by hand
+and drive a small run from it, with the harness — your code, not the
+"model" — owning every state transition. Start from the course's
+`templates/feature_list.json` (or copy its shape) and write a list with
+three features for the triage system: one that already passes, one that
+needs a code change, and one whose verification command fails for a reason
+outside the agent's control. Each feature needs the triple: a behaviour
+description, a verification command, and a state, starting from
+`not_started`. Then write a short driver script that loops over the list,
+runs each feature's verification command, and moves the feature to
+`passing` only when the command exits with code 0.
+
+**Acceptance criteria**
+
+- The driver never lets the agent side write state: the only code that
+  changes a feature's state is the harness, and you can point to the line
+  that enforces it.
+- A feature whose verification command fails stays `active` (or moves to
+  `blocked` if the failure is environmental, such as a missing tool), and
+  never reaches `passing` on a claim alone — demonstrate this by making the
+  mock agent assert the feature is done while the command still fails.
+- The driver prints the back-pressure count — the number of features not
+  yet `passing` — after each step, and the run ends when the count reaches
+  zero, which happens only after every verification command has passed.
+- You can state, in one sentence, which of the four harness consumers
+  (scheduler, verifier, handoff reporter, progress tracker) would break
+  first if each kept its own copy of the list instead of reading the
+  shared file, and why.

@@ -1,0 +1,24 @@
+{
+    "_comment": "Each feature in this file is a triple: a behaviour, which is a plain-language description of what the feature must do; a verification_command, which is the exact command that proves the behaviour works; and a state, which records where the feature stands. The allowed states are not_started, active, blocked, and passing. The gating rule is that a feature moves from active to passing only when its verification_command succeeds, so a feature is never marked passing by hand, by guess, or because the code looks finished. This explanation lives in the _comment field so the file stays valid JavaScript Object Notation (JSON) that a script can read.",
+    "features": [
+        {
+            "behaviour": "When a user searches for a word that appears in an item title, the search endpoint returns every item whose title contains that word, and it returns no item whose title does not contain it.",
+            "id": "search-returns-matching-items",
+            "state": "not_started",
+            "verification_command": "pytest tests/test_search.py::test_search_returns_matching_items -q"
+        },
+        {
+            "behaviour": "When a user searches with an empty query, the search endpoint returns the full list of items instead of an error, so an empty search behaves like browsing the catalogue.",
+            "id": "search-empty-query-returns-all-items",
+            "state": "not_started",
+            "verification_command": "pytest tests/test_search.py::test_search_empty_query_returns_all_items -q"
+        },
+        {
+            "behaviour": "When a user searches for a word that matches nothing, the search endpoint returns an empty list with a successful response, rather than an error or a misleading result.",
+            "id": "search-no-results-returns-empty-list",
+            "state": "not_started",
+            "verification_command": "pytest tests/test_search.py::test_search_no_results_returns_empty_list -q"
+        }
+    ],
+    "project": "[project name]"
+}

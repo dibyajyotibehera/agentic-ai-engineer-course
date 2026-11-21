@@ -42,6 +42,15 @@ This chapter adapts, with attribution, Microsoft Lessons 12–13 of [AI Agents f
 - *RAFT: Adapting Language Model to Domain Specific RAG*, arXiv:2403.10131 (2024). Source of the RAFT note in the lesson: fine-tuning with retrieved documents in context, including distractor documents that do not help answer the question, so the model learns to use the relevant evidence, cite it, and ignore the rest.
   - https://arxiv.org/abs/2403.10131
 
+## Harness engineering (memory and context in production harnesses)
+
+- OpenAI, *Harness engineering: leveraging Codex in an agent-first world*. The Codex harness article: the million-line experiment built over five months, about 1,500 pull requests merged, and the repository-knowledge lesson behind this chapter's progressive disclosure section, that the agent gets a map rather than a manual.
+  - https://openai.com/index/harness-engineering/
+- Anthropic, *Effective harnesses for long-running agents*. Harness design for agents that work across many context windows: the initializer agent that sets up the environment on the first run, the coding agent that makes incremental progress in every session, progress files and feature lists as the handoff between sessions, and compaction as the context-management mechanism.
+  - https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents
+- Anthropic, *Harness design for long-running apps*. A second harness-design article: planner, generator and evaluator agents, context resets as an alternative to compaction, and the Opus 4.5 retro-game comparison (20 minutes and $9 bare, against 6 hours and $200 harnessed).
+  - https://www.anthropic.com/engineering/harness-design-long-running-apps
+
 ## Vendor documentation and pricing (verified figures)
 
 - Pinecone, *Design for multitenancy*. Source of the 1 read unit per 1 GB of namespace searched (minimum 0.25 read units), the 100-tenants × 1 GB worked example (1 read unit for a namespace-per-tenant query versus 100 read units for metadata filtering across a shared 100 GB namespace), and the 10,000-value cap on `$in` / `$nin` filters.
