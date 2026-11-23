@@ -10,10 +10,16 @@ three-tier store (``memory_store.py``) and the token budget
 
 Run it with:  python demo_support_copilot.py
 Run the checks with:  python -m py_compile memory_store.py token_budget.py demo_support_copilot.py
+Run the live paths (real model compaction and tool-result summary)
+with:  LLM_BACKEND=opencheap-connector python demo_support_copilot.py --live
 """
 
 from __future__ import annotations
 
+import sys
+
+from compaction import TranscriptTurn, compact_with_llm, prune_tool_result_with_llm
+from llm_client import LLMClient
 from memory_store import MemoryStatus, MemoryStore, Tier
 from token_budget import CostModel, TokenBudget
 
@@ -101,7 +107,58 @@ def main() -> None:
     print(f"Semantic cache at 65% hit rate leaves "
           f"{model.semantic_cache_calls(10_000, 0.65):,.0f} of 10,000 daily calls")
 
+    if "--live" in sys.argv:
+        run_live(store)
+
     store.close()
+
+
+def run_live(store: MemoryStore) -> None:
+    """Live section: real model compaction and tool-result summary.
+
+    Needs a configured model backend (``LLM_API_KEY`` or
+    ``LLM_BACKEND=opencheap-connector``). The transcript is the
+    working tier of the Acme session above, compacted by a real
+    model call; the billing record is summarised by a real model
+    call. Prints the model's token usage and cost for the run.
+    """
+    client = LLMClient()
+    transcript = [
+        TranscriptTurn("Refunds within 30 days need no approval.",
+                       role="system", is_instruction=True)
+        for _ in range(6)
+    ] + [
+        TranscriptTurn("Refund policy is 14 days with manager approval (June).",
+                       role="assistant", load_bearing=True),
+        TranscriptTurn("Customer asks about a refund on day 20.", role="user"),
+    ]
+    facts = [
+        "Refund policy is 14 days with manager approval (June, supersedes March).",
+        "Customer's plan is business, renewal 2027-03-01.",
+        "Tried re-issuing the invoice; it did not resolve the billing error.",
+    ]
+    print("\n=== Live compaction (real model) ===")
+    state = compact_with_llm(client, transcript, facts)
+    print(f"{state.tokens_before} -> {state.tokens_after} tokens; "
+          f"complete (all load-bearing facts preserved): {state.complete}")
+    print(state.summary)
+
+    print("\n=== Live tool-result pruning (real model) ===")
+    billing_record = "\n".join(
+        [
+            "plan: business",
+            "renewal date: 2027-03-01",
+            "seats: 42",
+            "past invoices: " + "INV-1001 $480, " * 40,
+        ]
+    )
+    pruned = prune_tool_result_with_llm(client, billing_record, strategy="summarise")
+    print(f"summarise: {pruned.tokens_before} -> {pruned.tokens_after} tokens")
+    print(f"summary: {pruned.text}")
+
+    print(f"\nModel usage for the live section: {client.total_prompt_tokens} prompt + "
+          f"{client.total_completion_tokens} completion tokens, "
+          f"cost ${client.total_cost_usd:.6f}")
 
 
 if __name__ == "__main__":

@@ -1,1 +1,5 @@
 # No third-party dependencies: Chapter 11 code uses the Python standard library only.
+# The deterministic demos need no API key. The live checks at the end of each file
+# (and the live tests in test_cascade_router.py) need a configured model backend:
+# set LLM_API_KEY, or run with LLM_BACKEND=opencheap-connector on a machine where
+# the OpenCheap connector is registered. Without one, the live checks skip.

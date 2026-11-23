@@ -13,7 +13,12 @@ Two pieces, kept separate because they answer different questions:
   units, not dollars, because the chapter's verified Pinecone figure is
   the 1-read-unit-per-1-GB rate, not a dollar price.
 
-No API key and no paid service are needed to run this module.
+No API key and no paid service are needed to run this module on its
+own. Stage 2 of :meth:`TokenBudget.compress` takes an optional
+``summariser`` callable: with one (for example a partial application
+of ``llm_summariser.summarise_tool_result`` bound to a client) the
+summaries are real model calls, and without one the stage keeps a
+head excerpt that is labelled as such, not as a summary.
 """
 
 from __future__ import annotations
@@ -88,13 +93,25 @@ class TokenBudget:
             return message
         return None
 
-    def compress(self, items: list[tuple[str, int]], budget: int) -> list[tuple[str, int]]:
+    def compress(
+        self,
+        items: list[tuple[str, int]],
+        budget: int,
+        summariser=None,
+    ) -> list[tuple[str, int]]:
         """Three-stage compression, in order of increasing loss.
 
         Stage 1 drops the lowest-ranked items (items are assumed ranked best
         first). Stage 2 summarises the survivors to roughly a tenth of their
         tokens. Stage 3 truncates what is left. Returns the items that fit,
         with their post-compression token counts.
+
+        ``summariser`` is an optional callable taking one text and
+        returning a summary. With a real summariser (a model call, see
+        ``llm_summariser``) stage 2 produces real summaries, sized by
+        their own estimated tokens. Without one, stage 2 keeps a head
+        excerpt of each survivor, labelled ``EXCERPT`` -- a head
+        excerpt is not a summary, and it is not presented as one.
         """
         total = sum(tokens for _, tokens in items)
         if total <= budget:
@@ -106,7 +123,16 @@ class TokenBudget:
         if kept and sum(tokens for _, tokens in kept) <= budget:
             return kept
         # Stage 2: summarise each survivor to ~10% of its tokens.
-        summarised = [(f"SUMMARY: {text[:120]}", max(1, tokens // 10)) for text, tokens in kept]
+        if summariser is not None:
+            summarised = []
+            for text, tokens in kept:
+                summary = summariser(text)
+                summarised.append((summary, max(1, len(summary) // 4)))
+        else:
+            summarised = [
+                (f"EXCERPT (head, not a model summary): {text[:120]}", max(1, tokens // 10))
+                for text, tokens in kept
+            ]
         if sum(tokens for _, tokens in summarised) <= budget:
             return summarised
         # Stage 3: truncate the summaries to fit.

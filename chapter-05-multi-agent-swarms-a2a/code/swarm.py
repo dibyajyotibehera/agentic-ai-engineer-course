@@ -14,12 +14,26 @@ chapter README:
 - Bounds: maximum fan-out, maximum rounds, per-worker timeouts, a token
   budget and a message budget, all enforced in code, not in prose.
 
-The worker agents here are deterministic stubs that read from a small
-in-memory account database, so the whole chapter runs with no model API key
-and no paid service. A real model-backed worker plugs in through
-``LLMWorker`` — see the TODO in that class. Where a real deployment would
-call Amazon Bedrock through Mastra, the seam is the ``Worker.run`` method:
-it takes a validated envelope and returns a validated envelope.
+The worker agents here are deterministic on purpose, and that is a
+deliberate stand-in, not an unfinished one: the lesson of this chapter
+is the topology and the handoff mechanics — typed envelopes, validation,
+consensus rules and bounds — and deterministic workers make those
+mechanics runnable, repeatable and testable with no model API key and
+no paid service. The researcher reads a real file
+(``accounts.json``, next to this module) instead of an in-memory
+dictionary, and the policy checker is a rule table, because looking a
+fact up and applying a written rule are deterministic jobs, not model
+jobs. The two workers that do pretend to be a model — the sentiment
+scorer, which judges tone, and the drafter, which writes prose — have
+real model-backed versions in this module: ``ModelSentimentWorker``
+and ``ModelDrafterWorker``, built on ``LLMWorker`` and the shared
+``llm_client.py`` client (copied verbatim from Chapter 7). The live
+demo ``demo_live_swarm.py`` runs the swarm with those two workers, so
+the swarm runs for real; the deterministic demos keep the
+deterministic workers, so the topology lesson stays runnable offline.
+Where a real deployment would call Amazon Bedrock through Mastra, the
+seam is the ``Worker.run`` method: it takes a validated envelope and
+returns a validated envelope.
 """
 
 from __future__ import annotations
@@ -28,7 +42,10 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+
+from llm_client import LLMClient, LLMError
 
 # ---------------------------------------------------------------------------
 # Errors: every failure mode is a named, catchable outcome.
@@ -332,13 +349,18 @@ class Worker:
     call. The supervisor simulates elapsed time from these declarations
     instead of sleeping, so runs stay fast and deterministic; a worker that
     declares a latency above the supervisor's per-worker timeout is treated
-    exactly like a worker that really hung.
+    exactly like a worker that really hung. A model-backed worker instead
+    records its real cost in ``last_call_tokens`` and its real elapsed
+    time, which the supervisor reads after the call — see ``LLMWorker``.
     """
 
     name: str = "worker"
     accepts: str = "TicketState"
     latency_s: float = 0.1
     tokens: int = 500
+    # Set by a model-backed worker after a real call; None means "use the
+    # declared ``tokens`` above", which is what deterministic workers do.
+    last_call_tokens: Optional[int] = None
 
     def handle(self, envelope: TaskEnvelope) -> TaskEnvelope:
         payload = validate_envelope(envelope, expected_recipient=self.name)
@@ -355,20 +377,31 @@ class Worker:
         raise NotImplementedError
 
 
-# A small in-memory account database, standing in for the account system a
-# real researcher worker would query through a tool.
-ACCOUNT_DB: Dict[str, Dict[str, str]] = {
-    "cust-001": {
-        "plan": "annual",
-        "renewal_date": "2026-03-14",
-        "account_status": "active",
-    },
-    "cust-002": {
-        "plan": "monthly",
-        "renewal_date": "2026-11-30",
-        "account_status": "past-due",
-    },
-}
+# The account database is a real file, ``accounts.json`` next to this
+# module — the account system a real researcher worker would query
+# through a tool, reduced to a file read so the chapter runs locally.
+# The researcher re-reads the file on every call, so a re-fetch of the
+# source of truth (see ``resolve_fact_disagreement`` and
+# ``demo_consensus.py`` case 4) really does go back to the source
+# instead of returning a cached copy.
+ACCOUNTS_PATH = Path(__file__).with_name("accounts.json")
+
+
+def load_accounts(path: Optional[Path] = None) -> Dict[str, Dict[str, str]]:
+    """Read the account database from disk and return it as a dict."""
+    with open(path or ACCOUNTS_PATH, encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        raise PayloadValidationError("accounts file must hold one object per customer")
+    return data
+
+
+def refetch_account(customer_id: str) -> Dict[str, str]:
+    """Re-fetch one customer's record from the source of truth on disk."""
+    record = load_accounts().get(customer_id)
+    if record is None:
+        raise PayloadValidationError(f"unknown customer: {customer_id!r}")
+    return {"customer_id": customer_id, **record}
 
 
 class ResearcherWorker(Worker):
@@ -377,11 +410,7 @@ class ResearcherWorker(Worker):
     tokens = 800
 
     def work(self, payload: TicketState, task_id: str) -> ResearchResult:
-        record = ACCOUNT_DB.get(payload.customer_id)
-        if record is None:
-            raise PayloadValidationError(
-                f"unknown customer: {payload.customer_id!r}"
-            )
+        record = refetch_account(payload.customer_id)
         return ResearchResult(
             customer_id=payload.customer_id,
             plan=record["plan"],
@@ -503,23 +532,246 @@ class DrafterWorker(Worker):
 
 
 class LLMWorker(Worker):
-    """Seam for a real model-backed worker.
+    """Base class for a model-backed worker.
 
-    TODO: replace ``work`` with a call to your model — for the production
-    stack in this course, that is Amazon Bedrock through Mastra, invoked
-    from the worker's tool layer. The contract is unchanged: ``work`` takes
-    a typed payload and returns a typed payload, and the base class keeps
-    owning validation and the envelope. Do not let the model return free
-    text across a handoff; parse its structured output into the payload
-    dataclass and let the validator catch a malformed response.
+    A model-backed worker is a worker whose judgement or prose comes
+    from a real model call, through the shared ``LLMClient`` (the same
+    client Chapter 7 uses). The contract is unchanged: ``work`` takes
+    a typed payload and returns a typed payload, the base class keeps
+    owning validation and the envelope, and the model never returns
+    free text across a handoff — its structured JSON reply is parsed
+    into the payload dataclass and the validator catches a malformed
+    response. A model failure is a loud ``LLMError``, which the
+    supervisor records as a rejection and the run continues without
+    that worker, exactly like a corrupt payload.
+
+    Subclasses implement ``prompt_for`` (the messages to send) and
+    ``parse_reply`` (the JSON object to the typed payload). The two
+    concrete workers are ``ModelSentimentWorker`` (a judgement, so it
+    uses the cheap ``:floor`` judge route) and ``ModelDrafterWorker``
+    (prose, so it uses the full model). Pass a client in, or leave it
+    out and one is built from the environment — which raises loudly
+    when no key or backend is configured, instead of silently
+    falling back to a fake reply.
     """
 
     name = "llm-worker"
 
+    def __init__(self, client: Optional[LLMClient] = None) -> None:
+        self.client = client or LLMClient()
+        self.last_call_tokens = None
+
+    def _record_usage(self) -> None:
+        before = getattr(self, "_usage_before", (0, 0))
+        now = (
+            self.client.total_prompt_tokens,
+            self.client.total_completion_tokens,
+        )
+        self.last_call_tokens = (now[0] - before[0]) + (now[1] - before[1])
+        self._usage_before = now
+
+    def _structured(self, messages: list, *, model: Optional[str] = None,
+                    max_tokens: int, required_fields: tuple = ()) -> dict:
+        self._usage_before = (
+            self.client.total_prompt_tokens,
+            self.client.total_completion_tokens,
+        )
+        result = self.client.structured(
+            messages, model=model, temperature=0.0,
+            max_tokens=max_tokens, required_fields=required_fields,
+        )
+        self._record_usage()
+        return result
+
+    def prompt_for(self, payload: Any, task_id: str) -> list:
+        raise NotImplementedError("a model-backed worker defines prompt_for")
+
+    def parse_reply(self, reply: dict, payload: Any) -> Any:
+        raise NotImplementedError("a model-backed worker defines parse_reply")
+
     def work(self, payload: Any, task_id: str) -> Any:
-        raise NotImplementedError(
-            "LLMWorker needs a model API key and a model call; "
-            "implement work() against your provider. See the TODO above."
+        reply = self._structured(
+            self.prompt_for(payload, task_id),
+            model=self._model_for(payload),
+            max_tokens=self._max_tokens(),
+            required_fields=self._required_fields(),
+        )
+        return self.parse_reply(reply, payload)
+
+    def _model_for(self, payload: Any) -> Optional[str]:
+        return None
+
+    def _max_tokens(self) -> int:
+        return 400
+
+    def _required_fields(self) -> tuple:
+        return ()
+
+
+class ModelSentimentWorker(LLMWorker):
+    """The sentiment scorer, backed by a real model judgement.
+
+    The deterministic ``SentimentWorker`` scores tone with keyword
+    lists; this worker asks the model instead, on the cheap judge
+    route (``LLM_JUDGE_MODEL``, ``kimi-k3.1-pro:floor`` by default),
+    because sentiment is a short classification, not a reasoning
+    task. The reply must be a JSON object with a ``score`` between
+    0.0 and 1.0 and a ``label`` from the allowed set, and the typed
+    validator rejects anything else.
+    """
+
+    name = "sentiment-scorer"
+    accepts = "TicketState"
+    tokens = 400
+
+    def _model_for(self, payload: Any) -> Optional[str]:
+        return self.client.judge_model
+
+    def _max_tokens(self) -> int:
+        # Generous on purpose: this model spends much of its budget
+        # on hidden reasoning tokens, and with a small budget (a few
+        # hundred) it can spend it all on reasoning and return empty
+        # content — the same gotcha Chapter 7 documents. The reply
+        # itself is short; the budget is headroom for the reasoning.
+        return 1200
+
+    def _required_fields(self) -> tuple:
+        return ("score", "label")
+
+    def prompt_for(self, payload: TicketState, task_id: str) -> list:
+        return [
+            {
+                "role": "system",
+                "content": (
+                    "Score the sentiment of a support ticket. Reply with "
+                    "a JSON object only: {\"score\": <number 0.0 to 1.0>, "
+                    "\"label\": <one of \"frustrated\", \"neutral\", "
+                    "\"pleased\">}. 0.0 is furious, 1.0 is delighted. "
+                    "Judge only the customer's words, not the subject line."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Subject: {payload.subject}\nBody: {payload.body}"
+                ),
+            },
+        ]
+
+    def parse_reply(self, reply: dict, payload: TicketState) -> SentimentResult:
+        candidate = {
+            "score": reply["score"],
+            "label": reply["label"],
+            "provenance": "sentiment-scorer",
+        }
+        return validate_sentiment_result(candidate)
+
+
+class ModelDrafterWorker(LLMWorker):
+    """The drafter, backed by a real model call.
+
+    The deterministic ``DrafterWorker`` assembles the reply from a
+    template; this worker asks the model to write it, from the same
+    typed inputs only — the researcher's facts and the policy
+    checker's verdict, with their provenance. The reply must be a
+    JSON object with ``reply_text`` and a ``claims`` list, and every
+    claim must carry a provenance of ``researcher`` or
+    ``policy-checker``; a claim that invents a fact or a provenance
+    is rejected by the typed validator, so model prose can never
+    smuggle an unsourced fact into the reply.
+    """
+
+    name = "drafter"
+    accepts = "DraftInput"  # see validate_draft_input below
+    tokens = 700
+
+    def _max_tokens(self) -> int:
+        # Generous on purpose: see ModelSentimentWorker — the model
+        # spends much of its budget on hidden reasoning, and a small
+        # budget can return empty content. The reply itself is short.
+        return 2000
+
+    def _required_fields(self) -> tuple:
+        return ("reply_text", "claims")
+
+    def prompt_for(self, payload: Any, task_id: str) -> list:
+        research: ResearchResult = payload["research"]
+        policy: PolicyResult = payload["policy"]
+        return [
+            {
+                "role": "system",
+                "content": (
+                    "Write a short, polite support reply using ONLY the "
+                    "facts below. Do not invent dates, plans, policies or "
+                    "amounts. Reply with a JSON object only: "
+                    "{\"reply_text\": <the reply>, \"claims\": "
+                    "[{\"claim\": <one fact stated in the reply>, "
+                    "\"provenance\": <\"researcher\" or "
+                    "\"policy-checker\">}, ...]}. Every factual claim in "
+                    "the reply must appear in \"claims\" with the "
+                    "provenance of the worker it came from."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Subject: {payload['subject']}\n"
+                    f"Account facts (from researcher): plan "
+                    f"{research.plan}, renewal date "
+                    f"{research.renewal_date}, account status "
+                    f"{research.account_status}.\n"
+                    f"Policy verdict (from policy-checker): "
+                    f"{policy.policy_name}, applies: {policy.applies}, "
+                    f"priority {policy.priority}. Reason: {policy.reason}"
+                ),
+            },
+        ]
+
+    def parse_reply(self, reply: dict, payload: Any) -> DraftResult:
+        claims = reply["claims"]
+        if not isinstance(claims, list):
+            raise LLMError("model reply claims must be a list")
+        for claim in claims:
+            if not isinstance(claim, dict):
+                raise LLMError("model reply claim must be an object")
+            if claim.get("provenance") not in ("researcher", "policy-checker"):
+                raise LLMError(
+                    "model claim carries an unknown provenance: "
+                    f"{claim.get('provenance')!r}"
+                )
+        candidate = {
+            "reply_text": reply["reply_text"],
+            "claims": claims,
+            "provenance": "drafter",
+        }
+        return validate_draft_result(candidate)
+
+    def handle(self, envelope: TaskEnvelope) -> TaskEnvelope:
+        # Same bundle validation as the deterministic drafter: the
+        # input is a bundle of the other workers' typed results, so
+        # it validates the bundle itself rather than through the
+        # generic payload registry.
+        if envelope.recipient != self.name:
+            raise WrongRecipientError(
+                f"envelope addressed to {envelope.recipient!r}, "
+                f"but received by {self.name!r}"
+            )
+        if compute_checksum(envelope.payload) != envelope.checksum:
+            raise ChecksumError("checksum mismatch on draft input")
+        bundle = envelope.payload
+        research = validate_research_result(bundle.get("research", {}))
+        policy = validate_policy_result(bundle.get("policy", {}))
+        result = self.work(
+            {"research": research, "policy": policy,
+             "subject": bundle.get("subject", "")},
+            envelope.task_id,
+        )
+        return make_envelope(
+            task_id=envelope.task_id,
+            sender=self.name,
+            recipient="supervisor",
+            payload=result,
+            sequence=envelope.sequence + 1,
         )
 
 
@@ -686,6 +938,7 @@ class SwarmResult:
     run_id: str
     status: str  # "completed", "partial", "failed"
     draft: Optional[DraftResult] = None
+    sentiment: Optional[SentimentResult] = None
     trace: List[TraceEvent] = field(default_factory=list)
     handoffs: int = 0
     tokens_used: int = 0
@@ -710,7 +963,7 @@ class Supervisor:
     def __init__(
         self,
         workers: List[Worker],
-        drafter: DrafterWorker,
+        drafter: Worker,  # DrafterWorker or ModelDrafterWorker
         limits: Optional[SwarmLimits] = None,
     ) -> None:
         self.workers = workers
@@ -746,9 +999,13 @@ class Supervisor:
             result.handoffs += 1
 
         # Round 1: fan out to the research and policy workers in parallel.
-        # In this deterministic implementation the "parallel" fan-out is a
-        # loop over the workers; the ordering guarantee is that no worker
-        # sees another worker's output.
+        # In this implementation the "parallel" fan-out is a loop over
+        # the workers; the ordering guarantee is that no worker sees
+        # another worker's output. Deterministic workers report their
+        # declared latency and token cost; a model-backed worker
+        # reports its real elapsed time and its real token usage, and
+        # a model failure is recorded as a rejection, so the run
+        # continues partial instead of crashing.
         fan_out = self.workers[: self.limits.max_fan_out]
         for worker in fan_out:
             if result.handoffs >= self.limits.max_handoffs:
@@ -775,14 +1032,25 @@ class Supervisor:
                       f"{self.limits.per_worker_timeout_s}s timeout")
                 continue  # skip the worker; the run continues partial
             try:
+                started = time.monotonic()
                 reply = worker.handle(envelope)
+                elapsed = time.monotonic() - started
             except EnvelopeError as exc:
                 trace("supervisor", worker.name, envelope,
                       "rejected", str(exc))
                 continue
-            result.tokens_used += worker.tokens
+            except LLMError as exc:
+                trace("supervisor", worker.name, envelope,
+                      "rejected", f"model call failed: {exc}")
+                continue
+            result.tokens_used += (
+                worker.last_call_tokens
+                if worker.last_call_tokens is not None
+                else worker.tokens
+            )
+            latency = elapsed if isinstance(worker, LLMWorker) else worker.latency_s
             trace("supervisor", worker.name, envelope, "ok",
-                  latency=worker.latency_s)
+                  latency=latency)
             # The supervisor validates the reply with the same rigour as
             # the worker validated the request: a corrupt reply is a
             # rejection, not a crash, and the run continues without it.
@@ -797,6 +1065,8 @@ class Supervisor:
                 research = typed
             elif isinstance(typed, PolicyResult):
                 policy = typed
+            elif isinstance(typed, SentimentResult):
+                result.sentiment = typed
 
         # Round 2: the drafter writes the single artefact, from typed
         # results only. If either input is missing, the run is partial.
@@ -825,15 +1095,31 @@ class Supervisor:
             sequence=1,
         )
         try:
+            started = time.monotonic()
             draft_reply = self.drafter.handle(draft_envelope)
+            draft_elapsed = time.monotonic() - started
         except EnvelopeError as exc:
             trace("supervisor", "drafter", draft_envelope,
                   "rejected", str(exc))
             result.status = "partial"
             return result
-        result.tokens_used += self.drafter.tokens
+        except LLMError as exc:
+            trace("supervisor", "drafter", draft_envelope,
+                  "rejected", f"model call failed: {exc}")
+            result.status = "partial"
+            return result
+        result.tokens_used += (
+            self.drafter.last_call_tokens
+            if self.drafter.last_call_tokens is not None
+            else self.drafter.tokens
+        )
+        draft_latency = (
+            draft_elapsed
+            if isinstance(self.drafter, LLMWorker)
+            else self.drafter.latency_s
+        )
         trace("supervisor", "drafter", draft_envelope, "ok",
-              latency=self.drafter.latency_s)
+              latency=draft_latency)
         result.draft = validate_envelope(
             draft_reply, expected_recipient="supervisor"
         )

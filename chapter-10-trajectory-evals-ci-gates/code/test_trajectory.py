@@ -2,7 +2,11 @@
 
     python -m unittest test_trajectory -v
 
-from inside the code/ directory. No network, no model, no API key.
+from inside the code/ directory. The deterministic tests need no
+network, no model, and no API key. The live tests at the end need a
+configured model backend (``LLM_API_KEY`` or
+``LLM_BACKEND=opencheap-connector``) and skip when there is none: a
+skipped live test means "not run", not "passed".
 """
 
 import json
@@ -10,9 +14,10 @@ import unittest
 from pathlib import Path
 
 from ci_gate import canary_verdict, gate, run_suite
-from faithfulness import context_recall_score, faithfulness_score
+from faithfulness import LLMClaimChecker, context_recall_score, faithfulness_score
 from grader import StepLevelGrader
-from judge import MockJudge, measure_agreement
+from judge import LLMJudge, MockJudge, measure_agreement, trajectory_to_text
+from llm_client import LLMClient
 from trajectory import (
     GoldenDAG,
     Trajectory,
@@ -258,6 +263,66 @@ class TestCanaryVerdict(unittest.TestCase):
         self.assertEqual(
             canary_verdict(self.STABLE, canary), "roll back: eval pass rate"
         )
+
+
+@unittest.skipUnless(LLMClient.has_backend(), "needs a configured LLM backend")
+class TestLLMJudgeLive(unittest.TestCase):
+    """Live tests: the real judge against the real model.
+
+    The rubric grades the run itself — order, arguments and
+    confirmation — because the fixture trajectories are tool-call
+    records with no customer-facing message text. These tests assert
+    the verdicts the demo shows, and they will fail if a judge model
+    stops seeing the ordering error; that failure is the signal, not
+    noise, because a judge that cannot see the chapter's central
+    failure cannot be trusted to grade it.
+    """
+
+    RUBRIC = (
+        "The run must check eligibility before issuing any refund, "
+        "the refund amount and order must match what eligibility "
+        "authorised, and the run must send a confirmation after the "
+        "refund. A run that refunds before the eligibility check "
+        "fails, even when the amount is correct."
+    )
+
+    def test_judge_passes_the_golden_run(self):
+        _, _, trajectories = load_fixtures()
+        verdict = LLMJudge().grade(
+            trajectory_to_text(trajectories["refund-golden"]), self.RUBRIC
+        )
+        self.assertEqual(verdict["label"], "pass")
+
+    def test_judge_fails_the_ordering_error_run(self):
+        _, _, trajectories = load_fixtures()
+        verdict = LLMJudge().grade(
+            trajectory_to_text(trajectories["refund-ordering-error"]),
+            self.RUBRIC,
+        )
+        self.assertEqual(verdict["label"], "fail")
+        self.assertIn("eligibility", verdict["rationale"].lower())
+
+
+@unittest.skipUnless(LLMClient.has_backend(), "needs a configured LLM backend")
+class TestLLMClaimCheckerLive(unittest.TestCase):
+    """Live test: the real claim checker on the Ragas example."""
+
+    def test_claim_checker_scores_the_ragas_example_at_one_half(self):
+        checker = LLMClaimChecker()
+        result = faithfulness_score(
+            response=(
+                "Einstein was born in Germany. "
+                "Einstein won the Nobel Prize in 1955."
+            ),
+            retrieved_contexts=[
+                "Albert Einstein (born 14 March 1879) was a German-born "
+                "theoretical physicist."
+            ],
+            entails=checker.entails,
+        )
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(result["supported"], 1)
+        self.assertEqual(result["faithfulness"], 0.5)
 
 
 if __name__ == "__main__":

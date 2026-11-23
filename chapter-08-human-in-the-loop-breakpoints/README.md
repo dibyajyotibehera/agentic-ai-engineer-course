@@ -420,12 +420,19 @@ to notice that before the incident review does.
 ## What to run next
 
 The code in `code/` implements the whole chapter in standard-library
-Python with no API key and no paid service: `durable_pause.py` is
-the agent that pauses before its write tool, `approval_server.py`
-is the signed webhook endpoint, `slack_gate.py` and `teams_gate.py`
-build the two chat approval cards, `store.py` holds the checkpoints
-and the hash-chained audit log, and `audit.py` reconstructs a run
-from the log alone. Start with `python demo_end_to_end.py`, which
+Python. The plan step is a real model call, so the agent run and the
+demo need a configured model backend: set `LLM_API_KEY` (with
+`LLM_BASE_URL` and `LLM_MODEL` as needed) or run with
+`LLM_BACKEND=opencheap-connector` on a machine where the OpenCheap
+connector is registered. Without a backend the run fails loudly
+instead of planning from a template — this chapter has no mock model.
+`durable_pause.py` is the agent that plans with the model and pauses
+before its write tool, `approval_server.py` is the signed webhook
+endpoint, `slack_gate.py` and `teams_gate.py` build the two chat
+approval cards and deliver them for real when credentials are set,
+`store.py` holds the checkpoints and the hash-chained audit log, and
+`audit.py` reconstructs a run from the log alone. Start with
+`LLM_BACKEND=opencheap-connector python demo_end_to_end.py`, which
 runs the full pause–approve–resume–audit cycle with assertions at
 every step, then work through `exercises.md`, where the first
 exercise kills the process mid-pause and demands the run back.

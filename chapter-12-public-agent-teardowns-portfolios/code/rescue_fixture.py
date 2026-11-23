@@ -10,11 +10,15 @@ chapter's instruments (the cost table, the latency profile, the benchmark,
 and architecture decision records).
 
 The numbers are ILLUSTRATIVE worked-example figures, labelled as such in
-the bundle: token counts follow the mock copilot trace in
-``cost_per_task.py`` (three model calls, four Model Context Protocol tool
-calls, memory context, one judge call), and the prices are illustrative
-per-token prices, not any provider's published prices. What matters is the
-shape of the change between the two weeks, not the absolute dollars.
+the bundle — deliberately constructed, not measured, because the
+brokenness IS the exercise: the student is handed a failing agent and
+must diagnose it from the shape of the change, not from a live run.
+Token counts follow the live copilot's shape in ``copilot.py`` (three
+model calls, four Model Context Protocol tool calls, memory context,
+one judge call), and the prices are illustrative per-token prices, not
+any provider's published prices. What matters is the shape of the
+change between the two weeks, not the absolute dollars. Nothing in the
+bundle is presented as a measured teardown number.
 
 The generator is deterministic: no randomness, no clock, no network. Run
 it twice and the bundle is byte-identical. Standard library only.
@@ -43,8 +47,9 @@ BASELINE_OUTPUT_PER_MILLION = 15.00
 FAILING_INPUT_PER_MILLION = 6.00
 FAILING_OUTPUT_PER_MILLION = 30.00
 
-# Baseline trace shape: the mock copilot from cost_per_task.py — three
+# Baseline trace shape: the live copilot's shape (copilot.py) — three
 # model calls, four tool calls, 1,500 memory tokens, one judge call.
+# The counts themselves are illustrative worked-example figures.
 BASELINE_MODEL_CALLS = [(3_200, 420), (2_800, 380), (2_100, 510)]
 BASELINE_MEMORY_TOKENS = 1_500
 BASELINE_EVAL_TOKENS = (1_800, 120)
@@ -61,9 +66,9 @@ FAILING_TOOL_CALLS_PER_TASK = 7  # was 5: knowledge-base searches rose 2 -> 4
 BASELINE_TOOL_CALLS_PER_TASK = 5  # 1 account + 1 subscription + 2 KB + 1 refund
 
 # Latency, seconds per run, over 20 runs each week. Deterministic arithmetic
-# progressions, not measurements: the baseline week is the mock copilot's
-# shape (slowest step the refund-eligibility check), the failing week runs
-# longer because the loop makes more calls.
+# progressions, not measurements: the baseline week follows the live
+# copilot's shape, the failing week runs longer because the loop makes
+# more calls.
 BASELINE_LATENCIES = [round(2.40 + 0.05 * i, 2) for i in range(20)]
 FAILING_LATENCIES = [round(3.10 + 0.06 * i, 2) for i in range(20)]
 
@@ -241,8 +246,9 @@ def build_bundle() -> dict:
     return {
         "bundle": "support-copilot rescue exercise (Chapter 12, Exercise 4)",
         "note": (
-            "ILLUSTRATIVE worked-example figures: token counts follow the "
-            "mock copilot trace in cost_per_task.py and prices are "
+            "ILLUSTRATIVE worked-example figures, deliberately constructed "
+            "for the rescue exercise (not measured): token counts follow "
+            "the live copilot's shape in copilot.py and prices are "
             "illustrative per-token prices, not any provider's published "
             "prices. Diagnose from the shape of the change between the two "
             "weeks, not from the absolute dollars."

@@ -9,10 +9,24 @@ four lines a teardown must account for:
    from Chapter 4: working, episodic, and semantic memory).
 4. Evaluation cost: the price of grading the task at all.
 
-Everything is standard library only. Token counts come from your own traces;
-pass them in as a TaskTrace. The ``main()`` demo runs on a mock trace whose
-token counts are ILLUSTRATIVE placeholders — replace them with measured
-numbers before publishing a teardown.
+Everything is standard library only. Token counts come from measured
+runs of the real copilot in ``copilot.py``: ``main()`` runs three tickets
+through the live agent, and each run's token counts are the provider's
+own usage numbers, differenced per model call. Nothing in the
+per-task table is invented. ``TaskTrace`` can still be built by hand
+for tests or for pricing a trace recorded elsewhere — but a trace
+built by hand is labelled as such wherever it is printed, and it is
+not a teardown number.
+
+Pricing: the default prices are Moonshot's published list prices for
+Kimi K3.1 Pro ($2.00 input / $10.00 output per million tokens, read
+October 2026; see references.md), which is the model the live runs
+use. The judge runs on the cheap ``:floor`` route, which costs less
+than the list price, so the evaluation line priced at list is an
+upper bound, not an exact figure. Set ``LLM_INPUT_PRICE_PER_MILLION``
+and ``LLM_OUTPUT_PRICE_PER_MILLION`` to price at your own router's
+rates instead, and check the provider's price page before publishing:
+per-token prices change.
 
 Two reference figures are printed by the demo, exactly as verified for this
 chapter (see README.md and references.md). They are constants, not computed
@@ -32,12 +46,16 @@ values, because they come from published studies and documentation:
   prices.
 
 Usage:
-    python cost_per_task.py
+    LLM_BACKEND=opencheap-connector python cost_per_task.py
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
+
+from copilot import TICKETS, CopilotRun, run_copilot
+from llm_client import LLMClient
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +77,10 @@ SCREENSHOT_TOKENS_HIGH = 1_800
 COMPUTER_USE_30_STEP_INPUT_TOKENS = 783_000
 COMPUTER_USE_30_STEP_COST_USD = 1.61  # Claude Sonnet 5.5, list prices
 
+# Moonshot list prices for Kimi K3.1 Pro, USD per million tokens
+# (platform.kimi.ai pricing, October 2026). Override from the
+# environment to price at your router's actual rates.
+
 
 @dataclass
 class ModelPricing:
@@ -76,6 +98,19 @@ class ModelPricing:
         )
 
 
+def default_pricing() -> ModelPricing:
+    """Pricing for the live runs: Moonshot list, or env overrides."""
+    return ModelPricing(
+        name=os.environ.get("LLM_MODEL", "kimi-k3.1-pro"),
+        input_per_million=float(os.environ.get("LLM_INPUT_PRICE_PER_MILLION", 2.00)),
+        output_per_million=float(os.environ.get("LLM_OUTPUT_PRICE_PER_MILLION", 10.00)),
+    )
+
+
+# The pricing the live demo uses (Moonshot list prices, see above).
+KIMI_PRICING = default_pricing()
+
+
 @dataclass
 class ToolCall:
     """One tool invocation inside a task."""
@@ -87,12 +122,15 @@ class ToolCall:
 
 @dataclass
 class TaskTrace:
-    """A measured (or mock) record of one agent task.
+    """A measured record of one agent task.
 
     Token counts are per task. ``eval_input_tokens`` / ``eval_output_tokens``
     are the tokens spent grading the task — the judge is a line item, not
     free. ``memory_tokens`` is the context carried on the run (working memory
     re-sent on every call, plus retrieved episodic and semantic memory).
+    Build one from a live run with ``trace_from_run()``; a hand-built
+    trace is a test fixture or a re-priced recorded trace, not a
+    measurement, and must be labelled as such where it is shown.
     """
 
     task_id: str
@@ -109,6 +147,26 @@ class TaskTrace:
     @property
     def total_output_tokens(self) -> int:
         return sum(o for _, o in self.model_calls)
+
+
+def trace_from_run(run: CopilotRun) -> TaskTrace:
+    """Build a measured trace from one live copilot run.
+
+    Model and evaluation token counts are the provider's measured
+    usage; the tools are local, so tool cost is $0; memory tokens are
+    the run's estimate (character share of the draft prompt — see
+    ``copilot.py``), labelled as an estimate in the demo output.
+    """
+    eval_in = sum(i for i, _ in run.eval_calls)
+    eval_out = sum(o for _, o in run.eval_calls)
+    return TaskTrace(
+        task_id=run.ticket_id,
+        model_calls=list(run.model_calls),
+        tools=[ToolCall(name, calls=1) for name in run.tool_calls],
+        memory_tokens=run.memory_tokens,
+        eval_input_tokens=eval_in,
+        eval_output_tokens=eval_out,
+    )
 
 
 def cost_of_trace(trace: TaskTrace, pricing: ModelPricing) -> dict[str, float]:
@@ -296,7 +354,7 @@ def format_attribution_rollup(rollup: dict[str, float | str | int]) -> str:
     """Render a per-conversation attribution rollup as readable text."""
     lines = [
         "Attribution rollup — per-conversation unit economics "
-        "(ILLUSTRATIVE token counts):",
+        "(measured token counts):",
         f"  conversation: {rollup['conversation_id']}  "
         f"owner: {rollup['owner']}  product: {rollup['product']}",
         f"  tasks in conversation: {rollup['n_tasks']}",
@@ -313,65 +371,54 @@ def format_attribution_rollup(rollup: dict[str, float | str | int]) -> str:
     return "\n".join(lines)
 
 
-def mock_copilot_trace(task_id: str) -> TaskTrace:
-    """Build a mock trace for one support-copilot ticket.
-
-    Token counts are ILLUSTRATIVE placeholders showing the shape of a real
-    trace: a ReAct loop of three model calls, four Model Context Protocol
-    tool calls fanning out per ticket, memory context carried on the run, and
-    one judge call grading the outcome. Replace every number with a measured
-    trace before publishing.
-    """
-    return TaskTrace(
-        task_id=task_id,
-        model_calls=[(3_200, 420), (2_800, 380), (2_100, 510)],
-        tools=[
-            ToolCall("account_state", calls=1),
-            ToolCall("subscription_status", calls=1),
-            ToolCall("knowledge_base_search", calls=2),
-            ToolCall("refund_eligibility", calls=1),
-        ],
-        memory_tokens=1_500,
-        eval_input_tokens=1_800,
-        eval_output_tokens=120,
-    )
-
-
 def main() -> None:
-    # Prices are placeholders for the demo: set them from your provider's
-    # published price page. The breakdown shape is what matters here.
-    pricing = ModelPricing(
-        name="illustrative-main-model",
-        input_per_million=3.00,
-        output_per_million=15.00,
-    )
-    traces = [mock_copilot_trace(f"ticket-{i:03d}") for i in range(5)]
+    # Live run: three tickets through the real copilot (nine model
+    # calls). Prices are Moonshot's list prices for Kimi K3.1 Pro
+    # unless LLM_INPUT/OUTPUT_PRICE_PER_MILLION override them.
+    client = LLMClient()  # raises loudly without a configured backend
+    pricing = default_pricing()
+    runs = [run_copilot(client, ticket) for ticket in TICKETS[:3]]
+    traces = [trace_from_run(run) for run in runs]
 
-    print("Support copilot — cost per task (ILLUSTRATIVE token counts)")
+    print("Support copilot — cost per task (MEASURED token counts)")
     print("=" * 64)
-    for trace in traces[:1]:
+    print(f"Pricing: {pricing.name} at ${pricing.input_per_million:.2f} input / "
+          f"${pricing.output_per_million:.2f} output per million tokens "
+          "(Moonshot list prices; judge line is an upper bound — the "
+          "judge runs on the cheaper :floor route).")
+    print("Memory tokens are estimated by character share of the draft "
+          "prompt (see copilot.py); model and judge tokens are measured.")
+    for trace, run in zip(traces, runs):
         breakdown = cost_of_trace(trace, pricing)
+        print(f"\n{trace.task_id} (judge: "
+              f"{'pass' if run.judge_pass else 'FAIL — ' + run.judge_reason}):")
         for line in ("model", "tools", "memory", "evaluation"):
             print(f"  {line:>11}: ${breakdown[line]:.4f}")
         print(f"  {'total':>11}: ${breakdown['total']:.4f} per ticket")
         print(f"  input tokens: {trace.total_input_tokens:,}; "
-              f"output tokens: {trace.total_output_tokens:,}")
+              f"output tokens: {trace.total_output_tokens:,}; "
+              f"eval tokens: {trace.eval_input_tokens + trace.eval_output_tokens:,}")
     summary = summarise(traces, pricing)
     monthly_volume = 10_000  # assumption, stated: tickets per month
-    print(f"\nMean cost per ticket over {int(summary['n'])} mock traces: "
+    print(f"\nMean cost per ticket over {int(summary['n'])} measured traces: "
           f"${summary['mean_total']:.4f}")
     print(f"At {monthly_volume:,} tickets/month (assumption): "
           f"${summary['mean_total'] * monthly_volume:,.2f}/month")
-    print(f"Worst mock task: ${summary['worst_total']:.4f}")
+    print(f"Worst measured task: ${summary['worst_total']:.4f}")
+    print(
+        f"Model usage for this run: {client.total_prompt_tokens} prompt "
+        f"tokens, {client.total_completion_tokens} completion tokens"
+        + (f", ${client.total_cost_usd:.4f} (router-reported)"
+           if client.total_cost_usd else "")
+    )
     print()
     print(judge_cost_comparison())
     print()
     print(computer_use_reference())
     print()
-    # Attribution rollup demo (new; the four-line output above is unchanged).
-    # Two mock tickets in one conversation, attributed to one team, rolled
-    # up to the per-conversation total the business thinks in. Token counts
-    # are the same ILLUSTRATIVE placeholders as the four-line demo.
+    # Attribution rollup: the first two measured tickets in one
+    # conversation, attributed to one team, rolled up to the
+    # per-conversation total the business thinks in.
     attributed = [
         attribute_task(
             trace, pricing,

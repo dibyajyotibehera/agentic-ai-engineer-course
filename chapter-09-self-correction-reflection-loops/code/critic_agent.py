@@ -21,12 +21,35 @@ Three design decisions matter, and all three are deliberate:
    full critique history and an escalation note — never an endless loop, and
    never a silent acceptance of a draft the critic rejected.
 
-The maker here is a scripted stand-in with a fixed list of drafts, so the
-module runs with no model and no API key. The critic is fully real: it
-executes each draft against a test suite. To plug in a language-model critic,
-use the ``LLM_CRITIC_PROMPT`` template below — but keep the test suite as
-well, because a model critic on its own is exactly the intrinsic
-self-correction that the research shows does not work (see README.md).
+Both model-facing components are real model calls, through
+``llm_client.LLMClient`` (the same client Chapter 7 uses):
+
+* ``LLMMaker`` generates the first draft and revises it using the
+  critic's findings, verbatim. It is the component that used to be a
+  scripted stand-in; it now calls a real model.
+* ``LLMCritic`` is a second-opinion judge in the Chapter 7 judge
+  pattern: it reads the specification, the draft and the test
+  evidence, and returns a structured JSON verdict with a confidence
+  score. It never rewrites the draft — rewriting is the maker's job.
+
+The verdict the loop *acts on* is always the test-suite critic's
+(``Critic``), never the model critic's. That division is the
+chapter's central lesson, not an implementation detail: a model
+critic on its own is exactly the intrinsic self-correction that the
+research shows does not work (see README.md), so the model judge is
+a second opinion whose agreement with the test suite is worth
+checking, and the test suite is the ground truth that decides
+whether the loop continues. The demo prints both verdicts side by
+side so the reader can see where they agree.
+
+Running the demo needs a configured model backend — ``LLM_API_KEY``
+(or ``LLM_BACKEND=opencheap-connector`` on the author's machine, as
+in Chapter 7). Without one it fails loudly instead of pretending
+with a scripted maker. The deterministic behaviour of the loop
+itself — rounds, stopping rules, escalation — is covered by the
+tests in ``test_critic_and_healing.py``, which drive the loop with a
+small scripted maker defined in that file, so the tests need no
+model and no key.
 
 Run the module directly:
 
@@ -35,34 +58,89 @@ Run the module directly:
 
 from __future__ import annotations
 
+import re
+import sys
 from dataclasses import dataclass, field
+from typing import Callable, Optional, Protocol
 
-# The prompt template for a language-model critic. The template is kept here
-# so the chapter's lesson is concrete even before a model is wired in: the
-# critic is instructed to return a structured verdict, to quote the failing
-# evidence, and never to rewrite the draft itself (rewriting is the maker's
-# job — a critic that rewrites is a second maker, not a check).
-LLM_CRITIC_PROMPT = """You are a code critic. Review the draft below against the specification
-and the test evidence. Do not rewrite the code.
+from llm_client import LLMClient, LLMError
 
-Specification:
+# The maker is asked for code only, in one fenced block, so the reply can
+# be extracted mechanically instead of interpreted. A maker that is
+# allowed to explain itself in prose is a maker whose explanation the
+# loop has to parse — and a parser is a place for a bug to hide.
+_MAKER_SYSTEM = """You are a Python programmer writing a single function. \
+Reply with exactly one fenced python code block containing the complete \
+function and nothing else — no explanation, no extra code, no tests."""
+
+_MAKER_FIRST_DRAFT = """Write a Python function that satisfies this specification:
+
+{specification}
+"""
+
+_MAKER_REVISE = """Revise the draft below so that it satisfies this specification:
+
 {specification}
 
-Draft:
+Current draft:
 ```python
 {draft}
 ```
 
-Test evidence (each test the draft was run against, and its result):
-{test_evidence}
-
-Return exactly:
-VERDICT: PASS or FAIL
-FINDINGS:
-- <one finding per line; each finding must name the failing test or the
-  specific line, state what happened, and state what the specification
-  requires instead>
+The critic ran the draft against a test suite and found these failures. \
+Change only what the findings name; do not rewrite unrelated parts:
+{findings}
 """
+
+# The model critic is instructed to judge from the evidence, not from
+# its own opinion of the code: the test evidence is the ground truth,
+# and the critic's job is to turn it into a structured verdict with a
+# confidence score, in the same shape as Chapter 7's injection judge.
+_CRITIC_SYSTEM = """You are a code critic. Review the draft below against the specification
+and the test evidence. Do not rewrite the code.
+
+Reply with a JSON object only, with exactly these fields:
+- "verdict": "PASS" or "FAIL"
+- "confidence": a number from 0.0 to 1.0
+- "findings": a list of objects, one per failing test, each with exactly
+  these fields: "test_name", "what_happened", "what_is_required". Each
+  finding must name the failing test, state what happened, and state what
+  the specification requires instead. Keep each field to one short
+  sentence. An empty list when the verdict is PASS.
+- "reason": one sentence explaining the verdict
+
+Do not add any other text."""
+
+_CRITIC_REQUIRED_FIELDS = ("verdict", "confidence", "findings", "reason")
+
+# Generous enough for a short function: this model spends part of its
+# token budget on hidden reasoning, and a small budget can be spent
+# entirely on reasoning, leaving an empty reply (see Chapter 7).
+_MAKER_MAX_TOKENS = 800
+# The critic returns a short structured verdict, not code — but with five
+# failing tests the findings list is long, and this model spends part of
+# its token budget on hidden reasoning, so the budget must still be
+# generous or the reply is cut off mid-JSON (see Chapter 7).
+_CRITIC_MAX_TOKENS = 1500
+
+_CODE_BLOCK_RE = re.compile(r"```(?:python)?\s*\n(.*?)\n?```", re.DOTALL)
+
+
+def _extract_code(reply: str) -> str:
+    """Return the Python code from a model reply.
+
+    Prefers the first fenced code block; falls back to the whole reply
+    when it already looks like code. Raises instead of returning a
+    plausible-looking fragment, because a half-extracted draft would
+    fail the tests for the wrong reason and teach the loop nothing.
+    """
+    match = _CODE_BLOCK_RE.search(reply)
+    if match:
+        return match.group(1).strip() + "\n"
+    stripped = reply.strip()
+    if stripped.startswith("def ") or stripped.startswith("import "):
+        return stripped + "\n"
+    raise LLMError(f"Model reply contained no Python code block: {reply[:300]}")
 
 
 @dataclass
@@ -157,30 +235,120 @@ class Critic:
         )
 
 
-class ScriptedMaker:
-    """A stand-in for a language-model maker.
+@dataclass
+class LLMCritique:
+    """What the model critic decided about one draft."""
 
-    TODO: replace with a real generator. Its interface is
-    ``revise(specification, findings) -> str``: given the specification and
-    the critic's findings from the previous round, return a new draft. A
-    real implementation should pass the findings verbatim into its prompt
-    and should be instructed to change only what the findings name.
-    """
+    verdict: str  # "PASS" or "FAIL"
+    confidence: float
+    findings: list[Finding] = field(default_factory=list)
+    reason: str = ""
 
-    def __init__(self, drafts: list[str]):
-        self.drafts = drafts
-        self._next = 1  # Index of the draft to return on the next revision.
+
+class LLMMaker:
+    """A real language-model maker: drafts and revises code by model call."""
+
+    def __init__(self, client: LLMClient) -> None:
+        self.client = client
 
     def first_draft(self, specification: str) -> str:
-        return self.drafts[0]
+        reply = self.client.complete(
+            [
+                {"role": "system", "content": _MAKER_SYSTEM},
+                {"role": "user", "content": _MAKER_FIRST_DRAFT.format(
+                    specification=specification)},
+            ],
+            temperature=0.0,
+            max_tokens=_MAKER_MAX_TOKENS,
+        )
+        return _extract_code(reply)
 
-    def revise(self, specification: str, findings: list[Finding]) -> str:
-        # The scripted maker simply moves to its next prepared draft; a real
-        # maker would rewrite using the findings. The findings are accepted
-        # here so the interface matches what a real maker needs.
-        draft = self.drafts[min(self._next, len(self.drafts) - 1)]
-        self._next += 1
-        return draft
+    def revise(self, specification: str, draft: str,
+               findings: list[Finding]) -> str:
+        findings_text = "\n".join(f"- {finding}" for finding in findings)
+        reply = self.client.complete(
+            [
+                {"role": "system", "content": _MAKER_SYSTEM},
+                {"role": "user", "content": _MAKER_REVISE.format(
+                    specification=specification,
+                    draft=draft,
+                    findings=findings_text,
+                )},
+            ],
+            temperature=0.0,
+            max_tokens=_MAKER_MAX_TOKENS,
+        )
+        return _extract_code(reply)
+
+
+class LLMCritic:
+    """A model critic: a second opinion, judged against test evidence.
+
+    Follows the Chapter 7 judge pattern — a cheap model, a fixed
+    prompt, a JSON verdict, temperature zero, and a confidence score.
+    The test-suite critique is passed in as the evidence, so the
+    model judge is reading ground truth, not re-deriving it from its
+    own opinion of the code. Its verdict never decides the loop; the
+    test-suite critic's verdict does.
+    """
+
+    def __init__(self, client: LLMClient) -> None:
+        self.client = client
+
+    def judge(self, draft: str, evidence: Critique) -> LLMCritique:
+        # The evidence is the test-suite critique: a pass count, plus one
+        # line per failing test. Passing tests need no line — a finding
+        # exists only for a test that failed, so the absence of a finding
+        # for a test is the record that it passed.
+        lines = [f"{evidence.tests_passed}/{evidence.tests_run} tests passed."]
+        for finding in evidence.findings:
+            lines.append(
+                f"- {finding.test_name}: {finding.what_happened}; "
+                f"required: {finding.what_is_required}"
+            )
+        evidence_text = "\n".join(lines)
+        user_message = (
+            f"Specification:\n{MEDIAN_SPEC}\n\n"
+            f"Draft:\n```python\n{draft}```\n\n"
+            f"Test evidence (each test the draft was run against, and "
+            f"its result):\n{evidence_text}"
+        )
+        result = self.client.structured(
+            [
+                {"role": "system", "content": _CRITIC_SYSTEM},
+                {"role": "user", "content": user_message},
+            ],
+            model=self.client.judge_model,
+            temperature=0.0,
+            max_tokens=_CRITIC_MAX_TOKENS,
+            required_fields=_CRITIC_REQUIRED_FIELDS,
+        )
+        verdict = str(result["verdict"]).upper()
+        if verdict not in ("PASS", "FAIL"):
+            raise ValueError(f"Critic returned an unknown verdict: {verdict!r}.")
+        findings = [
+            Finding(
+                test_name=str(item.get("test_name", "")),
+                what_happened=str(item.get("what_happened", "")),
+                what_is_required=str(item.get("what_is_required", "")),
+            )
+            for item in (result["findings"] or [])
+            if isinstance(item, dict)
+        ]
+        return LLMCritique(
+            verdict=verdict,
+            confidence=float(result["confidence"]),
+            findings=findings,
+            reason=str(result["reason"]),
+        )
+
+
+class Maker(Protocol):
+    """What the loop needs from a maker, model or otherwise."""
+
+    def first_draft(self, specification: str) -> str: ...
+    def revise(self, specification: str, draft: str,
+               findings: list[Finding]) -> str: ...
 
 
 @dataclass
@@ -203,23 +371,39 @@ class MakerCheckerReport:
 
 def run_maker_checker(
     specification: str,
-    maker: ScriptedMaker,
+    maker: Maker,
     critic: Critic,
     max_rounds: int = 3,
+    first_draft: str | None = None,
+    on_round: Optional[Callable[[int, str, Critique], None]] = None,
 ) -> MakerCheckerReport:
-    """Run the maker–critic loop for at most ``max_rounds`` rounds."""
+    """Run the maker–critic loop for at most ``max_rounds`` rounds.
+
+    ``first_draft`` starts the loop from an existing draft — a human's
+    first attempt, or a draft from an earlier run — instead of asking
+    the maker for one. ``on_round`` is called after each critique
+    with (round number, draft, critique); the demo uses it to ask the
+    model critic for a second opinion, and Chapter 9's watchdog demo
+    uses it to observe the loop's trajectory.
+    """
     critiques: list[Critique] = []
-    draft = maker.first_draft(specification)
+    if first_draft is not None:
+        draft = first_draft
+    else:
+        draft = maker.first_draft(specification)
     for round_no in range(1, max_rounds + 1):
         critique = critic.critique(draft)
         critiques.append(critique)
+        if on_round is not None:
+            on_round(round_no, draft, critique)
         if critique.verdict == "PASS":
             return MakerCheckerReport(True, round_no, max_rounds, draft, critiques)
         if round_no == max_rounds:
             break
-        # The findings are passed to the maker so a real maker can revise
-        # using exactly what the critic found.
-        draft = maker.revise(specification, critique.findings)
+        # The findings — and the draft they apply to — are passed to the
+        # maker so a real maker can revise using exactly what the critic
+        # found.
+        draft = maker.revise(specification, draft, critique.findings)
     return MakerCheckerReport(False, max_rounds, max_rounds, draft, critiques)
 
 
@@ -228,31 +412,55 @@ def run_maker_checker(
 # ---------------------------------------------------------------------------
 
 # Draft 1 is the classic first-pass mistake: it never sorts, it averages
-# nothing for even lengths, and it crashes on an empty list.
+# nothing for even lengths, and it crashes on an empty list. The demo
+# starts the loop from this draft — as if it were a first attempt handed
+# to the loop for repair — so the repair path is exercised on every run
+# instead of depending on the model making the same mistake first.
 DRAFT_BUGGY = '''
 def median(xs):
     n = len(xs)
     return xs[n // 2]
 '''
 
-# Draft 2 fixes every finding from the round-1 critique.
-DRAFT_FIXED = '''
-def median(xs):
-    if not xs:
-        raise ValueError("median of an empty list is undefined")
-    ordered = sorted(xs)
-    n = len(ordered)
-    mid = n // 2
-    if n % 2 == 1:
-        return ordered[mid]
-    return (ordered[mid - 1] + ordered[mid]) / 2
-'''
 
+def main() -> int:
+    try:
+        client = LLMClient()
+    except LLMError as error:
+        print(f"Cannot run the demo: {error}", file=sys.stderr)
+        print("Set LLM_API_KEY (and optionally LLM_BASE_URL and LLM_MODEL), "
+              "or run with LLM_BACKEND=opencheap-connector.", file=sys.stderr)
+        return 2
 
-if __name__ == "__main__":
+    maker = LLMMaker(client)
     critic = Critic(MEDIAN_SPEC, MEDIAN_TESTS)
-    maker = ScriptedMaker([DRAFT_BUGGY, DRAFT_FIXED])
-    report = run_maker_checker(MEDIAN_SPEC, maker, critic, max_rounds=3)
+    llm_critic = LLMCritic(client)
+
+    def second_opinion(round_no: int, draft: str, critique: Critique) -> None:
+        # The model critic reads the same test evidence the test-suite
+        # critic produced. Its verdict is printed, never acted on.
+        judgement = llm_critic.judge(draft, critique)
+        print(f"  Model critic, round {round_no}: {judgement.verdict} "
+              f"(confidence {judgement.confidence:.2f}) — {judgement.reason}")
+        if judgement.verdict != critique.verdict:
+            print("  NOTE: the model critic disagrees with the test suite. "
+                  "The test suite decides; this is the blind spot the "
+                  "chapter warns about.")
+
+    report = run_maker_checker(
+        MEDIAN_SPEC, maker, critic, max_rounds=3,
+        first_draft=DRAFT_BUGGY, on_round=second_opinion,
+    )
     print(report)
     print("\nFinal draft:")
     print(report.final_draft)
+    print(
+        f"\nModel usage for this run: {client.total_prompt_tokens} prompt tokens, "
+        f"{client.total_completion_tokens} completion tokens"
+        + (f", ${client.total_cost_usd:.4f}" if client.total_cost_usd else "")
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -215,5 +215,5 @@
     "p95_latency_baseline_s": 3.35,
     "p95_latency_failing_s": 4.24
   },
-  "note": "ILLUSTRATIVE worked-example figures: token counts follow the mock copilot trace in cost_per_task.py and prices are illustrative per-token prices, not any provider's published prices. Diagnose from the shape of the change between the two weeks, not from the absolute dollars."
+  "note": "ILLUSTRATIVE worked-example figures, deliberately constructed for the rescue exercise (not measured): token counts follow the live copilot's shape in copilot.py and prices are illustrative per-token prices, not any provider's published prices. Diagnose from the shape of the change between the two weeks, not from the absolute dollars."
 }

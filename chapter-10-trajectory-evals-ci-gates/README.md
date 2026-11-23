@@ -326,7 +326,16 @@ measurement, and it reports false passes and false fails separately,
 because they mean different things: a false pass lets a bad run
 ship, while a false fail wastes a human's time on re-review, and it
 is the false-pass rate that decides whether a judge may block a
-release.
+release. The judge itself is real in this chapter: `LLMJudge`
+grades through the shared client in `code/llm_client.py`, on the
+cheap route at temperature zero, and `demo_live.py` shows it
+passing the golden refund run and failing the ordering-error run
+for refunding before the eligibility check. The deterministic
+`MockJudge` stays beside it on purpose, because measuring a judge
+needs a judge whose verdicts are fixed and repeatable — the fixed
+judge is the instrument the agreement arithmetic is calibrated
+against, and a real model judge is the thing being measured, not
+the thing doing the measuring.
 
 Cost is the reason a judge is worth building despite all of that.
 In [LangChain's September 2026 head-to-head study of judges for agent evaluations](https://www.langchain.com/blog/jev-is-now-available-in-langsmith-evals),
@@ -365,9 +374,14 @@ at the claim level: a small specialised model, running locally, at
 zero cost per call and with the same answer every time, for the
 narrow question it was trained to answer. `code/faithfulness.py`
 implements the faithfulness and context-recall arithmetic with a
-deliberately naive stand-in for the claim check, so the formula is
-visible and the pipeline runs offline, and the HHEM classifier is a
-marked stub where the real model plugs in.
+deliberately naive keyword-overlap check as the default, so the
+formula is visible, the arithmetic is testable, and the pipeline
+runs offline — and the same arithmetic runs over real judgements
+when you pass `LLMClaimChecker`'s `entails` method in, which is a
+real model call through the shared client in `code/llm_client.py`.
+`demo_live.py` shows it scoring the Ragas worked example at 0.5,
+exactly as the keyword check does, and the HHEM classifier remains
+a marked stub where the local model plugs in.
 
 ## The CI gate: the evaluation becomes a release rule
 
@@ -519,7 +533,9 @@ gate so costly that nobody runs it.
 Start in `code/`: run `python ci_gate.py` and watch the gate fail
 on the critical ordering case, then run `python -m unittest
 test_trajectory -v` and read the tests, because the tests are the
-specification of what each piece promises. Then work through
-`exercises.md`, which builds the grader, the golden DAG, the
-distance metric, and the gate in that order, and ends with the
-canary verdict that completes the release story.
+specification of what each piece promises. Then run the live path,
+`LLM_BACKEND=opencheap-connector python demo_live.py`, and watch
+the real judge pass the golden run and fail the ordering-error run.
+Then work through `exercises.md`, which builds the grader, the
+golden DAG, the distance metric, and the gate in that order, and ends
+with the canary verdict that completes the release story.

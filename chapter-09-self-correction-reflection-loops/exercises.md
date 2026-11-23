@@ -5,8 +5,11 @@ exercise says otherwise. Every exercise names its difficulty —
 **Foundation**, **Intermediate** or **Advanced** — and its acceptance
 criteria, so you know when you are done. The model-backed exercises need a
 language-model application programming interface (API) key; where a full solution needs one, the exercise says
-so, and the scripted stand-ins in `code/` show the shape of the solution
-without it.
+so. The chapter's code already wires in a real model for the maker and
+the generator — there are no scripted stand-ins left in the shipped
+modules, only test doubles in `test_critic_and_healing.py` — so run
+the demos first and build on the real calls, rather than on a
+pretend model.
 
 ## Exercise 1 — Read a traceback like a diagnosis (Foundation)
 
@@ -43,16 +46,16 @@ Write the specification first, then a test suite of at least ten cases
 covering the edges, then a maker whose first draft contains exactly one
 seeded bug (for example, accepting `"2026-2-30"` or failing to strip
 whitespace). Run the loop from `code/critic_agent.py`, adapted to your
-specification and tests, with the maker as a scripted stand-in that returns
-the buggy draft first and a fixed draft second.
+specification and tests, with the real model maker (`LLMMaker`),
+starting from your seeded buggy draft as `first_draft`.
 
 **Acceptance criteria:** the round-1 critique is FAIL and names the seeded
 bug by test name; the round-2 critique is PASS with all tests green; the
 critic's findings quote the failing test and the required behaviour, never
 just "this is wrong"; the loop runs for at most three rounds. Stretch goal:
-wire a real language model in as the maker (the `TODO` in `critic_agent.py`
-marks where) and confirm the loop still converges — if the model fixes the
-bug in a way your tests do not cover, add a test for it.
+let the maker generate the first draft from scratch (no seeded bug) and
+compare the rounds and the token cost — and if the model fixes the bug in
+a way your tests do not cover, add a test for it.
 
 ## Exercise 3 — Traceback analysis: repair from the trace alone (Intermediate)
 
@@ -79,9 +82,9 @@ necessary — that boundary is the honest limit of this exercise.
 
 Rebuild `code/self_healing_loop.py` for a task of your own — a small
 command-line utility, a data-cleaning script, or a function with a
-specification and a verifier you write — and plug in a real language model
-as the generator. This exercise needs a model API key. Keep the loop's
-structure exactly as written (parse before executing, classify each
+specification and a verifier you write — reusing the real model
+generator (`LLMGenerator`) already wired into the chapter's code.
+This exercise needs a model API key. Keep the loop's structure exactly as written (parse before executing, classify each
 failure, verify the output, never just the exit code) and set the budget to
 three attempts, a 60-second wall-clock limit, and exponential backoff
 starting at one second.
@@ -208,16 +211,16 @@ and draft the reply" — once as a plain retry loop in the style of
 `code/self_healing_loop.py`, and once as a ReWOO-style plan-then-
 execute loop: a planner writes the whole plan up front with
 placeholders for results not yet seen, a worker executes it in one
-pass, and a solver synthesises the answer. Use scripted stand-ins for
-the model, as the chapter's code does. Then, for each version, seed
+pass, and a solver synthesises the answer. Use the real model calls,
+following the chapter's `LLMGenerator` pattern, rather than scripted
+stand-ins. Then, for each version, seed
 the same fault — the first tool call returns an error, or a result
 that changes what the second call should be — and record what
 happens: which version recovers, which version fails, how many model
 calls each one spends, and which runaway from the chapter's taxonomy
 each version is vulnerable to.
 
-**Acceptance criteria:** both versions run with no model and no API
-key; the seeded fault is identical in both; the write-up states the
+**Acceptance criteria:** both versions run against a real model; the seeded fault is identical in both; the write-up states the
 call counts and the outcome for each version, names the runaway each
 version is vulnerable to (and which one each version cannot suffer,
 and why), and says, in one paragraph, for which class of task you

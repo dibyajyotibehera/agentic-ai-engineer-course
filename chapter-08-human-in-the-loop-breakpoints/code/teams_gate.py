@@ -1,24 +1,27 @@
 """Microsoft Teams approval gate: Adaptive Card in, action out.
 
 This module is the Teams half of the chapter's chat-user-interface
-gate, and — like ``slack_gate.py`` — it is split into a part that
-runs with no credentials and a part that is an explicit TODO:
+gate. :func:`build_approval_card` builds the Adaptive Card JSON for
+an approval request, following the shape Microsoft documents for
+approval cards: the request as the card body, ``Approve`` and
+``Reject`` buttons, and the approval identifier carried in the
+action data so the response can be matched to the pending approval.
+:func:`handle_card_action` turns the submitted action data back
+into a decision. :func:`post_approval` really delivers the card: it
+POSTs the message to an incoming webhook URL
+(``TEAMS_WEBHOOK_URL``) over Hypertext Transfer Protocol, using the
+standard library only.
 
-* **Ready to run with no credentials** — :func:`build_approval_card`
-  builds the Adaptive Card JSON for an approval request, following
-  the shape Microsoft documents for approval cards: the request as
-  the card body, ``Approve`` and ``Reject`` buttons, and the approval
-  identifier carried in the action data so the response can be
-  matched to the pending approval. :func:`handle_card_action` turns
-  the submitted action data back into a decision.
-* **TODO — needs a real Teams app** — :func:`post_approval` actually
-  delivers the card. Teams has two delivery routes and they are not
-  interchangeable: an incoming webhook can post a card but cannot
-  receive an interactive ``Action.Execute`` response, so a real
-  approval gate needs a bot (or Power Automate's "post an Adaptive
-  Card and wait for a response" action) with an endpoint that
-  receives the ``adaptiveCard/action`` invoke request. Until a bot
-  is registered, :func:`render_local` prints the card JSON instead.
+One honest limit on the webhook route: an incoming webhook can post
+a card but cannot receive an interactive ``Action.Execute``
+response, so a card posted this way is for review, not for a live
+approval — a real approval gate needs a bot (or Power Automate's
+"post an Adaptive Card and wait for a response" action) with an
+endpoint that receives the ``adaptiveCard/action`` invoke request.
+The docstring of :func:`post_approval` says so, and the card it
+posts is the same card a bot would send, so the gate mechanics —
+card shape, action data, decision parsing — are the ones exercised
+here and in the tests.
 
 One Teams-specific trap is worth naming in advance: the card the
 approver sees must be the card *for that approver*. Microsoft's
@@ -33,6 +36,8 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
+import urllib.request
 
 ADAPTIVE_CARD_SCHEMA = "http://adaptivecards.io/schemas/adaptive-card.json"
 
@@ -123,33 +128,63 @@ def render_local(approval: dict) -> str:
     )
 
 
-def post_approval(approval: dict, conversation_id: str) -> dict:
-    """TODO: deliver the approval card to Microsoft Teams.
+def post_approval(approval: dict, webhook_url: str | None = None) -> dict:
+    """Deliver the approval card to Microsoft Teams.
 
-    Not runnable yet — it needs a real Teams app, which this chapter
-    does not provision for you. To finish it:
+    POSTs the Adaptive Card from :func:`build_approval_card` to an
+    incoming webhook URL — ``webhook_url`` if given, otherwise the
+    ``TEAMS_WEBHOOK_URL`` environment variable — and returns the
+    delivery status. Without a URL it raises ``RuntimeError`` with
+    the setup steps, instead of pretending the card was sent, and a
+    non-2xx response raises ``RuntimeError`` carrying the status,
+    so a failed delivery is never mistaken for a delivered approval.
 
-    1. Register a Teams bot (or use Power Automate's "post an
-       Adaptive Card and wait for a response" action) and point its
-       messaging endpoint at your approval endpoint.
-    2. Send the card from :func:`build_approval_card` as an
-       ``application/vnd.microsoft.card.adaptive`` attachment.
-    3. On the ``adaptiveCard/action`` invoke request, verify the
-       caller, call :func:`handle_card_action`, and record the
-       decision through the same decision endpoint the webhook
-       server exposes — never by trusting the card's contents alone.
-    4. After the first decision, edit the message so the card shows
-       who decided and removes the buttons (Microsoft's up-to-date
-       views pattern), so a second click cannot re-decide.
-
-    Until then, call :func:`render_local` and inspect the card JSON.
+    This is the webhook delivery route, and it has one honest limit:
+    an incoming webhook can post a card but cannot receive an
+    interactive ``Action.Execute`` response, so a card delivered
+    this way is for review, not for a live approval. A real approval
+    gate needs a bot (or Power Automate's "post an Adaptive Card and
+    wait for a response" action) with a messaging endpoint that
+    receives the ``adaptiveCard/action`` invoke request. On that
+    invoke request, verify the caller, call
+    :func:`handle_card_action`, and record the decision through the
+    same decision endpoint the webhook server exposes — never by
+    trusting the card's contents alone. After the first decision,
+    edit the message so the card shows who decided and removes the
+    buttons (Microsoft's up-to-date views pattern), so a second
+    click cannot re-decide.
     """
-    if not os.environ.get("TEAMS_BOT_APP_ID"):
-        raise NotImplementedError(
-            "Teams posting is a stub: register a Teams bot and finish"
-            " the send in post_approval (see its docstring)."
+    url = webhook_url or os.environ.get("TEAMS_WEBHOOK_URL")
+    if not url:
+        raise RuntimeError(
+            "No Teams webhook URL: pass webhook_url or set "
+            "TEAMS_WEBHOOK_URL to an incoming webhook URL for the "
+            "channel. Until then, call render_local and inspect the "
+            "card JSON."
         )
-    raise NotImplementedError(
-        "Teams posting is a stub: the card send in post_approval"
-        " still needs to be written (see its docstring)."
+    message = {
+        "type": "message",
+        "attachments": [{
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "content": build_approval_card(approval),
+        }],
+    }
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(message).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            response.read()
+            return {"delivered": True, "status": response.status}
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(
+            f"Teams webhook returned HTTP {error.code}: "
+            f"{error.read().decode(errors='replace')[:500]}"
+        ) from None
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        raise RuntimeError(
+            f"Teams webhook post did not complete: {error}"
+        ) from None

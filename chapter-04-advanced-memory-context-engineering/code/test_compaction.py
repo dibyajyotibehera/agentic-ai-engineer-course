@@ -1,12 +1,20 @@
 """Tests for code/compaction.py (Chapter 4, Exercise 6).
 
-Standard library only. Run from the chapter directory with:
+Standard library only for the deterministic tests. Run from the chapter directory with:
 
     python3 code/test_compaction.py
 
 or from inside code/ with:
 
     python3 test_compaction.py
+
+The live tests at the end need a configured model backend
+(``LLM_API_KEY`` or ``LLM_BACKEND=opencheap-connector``). When no
+backend is configured they skip instead of failing: a skipped live
+test means "not run", not "passed". The live tests cover the
+model-facing behaviour -- real model compaction preserving the
+load-bearing facts, and real model tool-result summarisation keeping
+the figures the next step needs.
 """
 
 import os
@@ -19,12 +27,21 @@ from compaction import (  # noqa: E402
     CompactedState,
     TranscriptTurn,
     compact,
+    compact_with_llm,
     detect_rot,
     estimate_tokens,
     lazy_load,
     prune_tool_result,
+    prune_tool_result_with_llm,
     should_compact,
 )
+from llm_client import LLMClient  # noqa: E402
+from memory_store import MemoryStore, Tier  # noqa: E402
+from token_budget import TokenBudget  # noqa: E402
+
+
+def _llm_available() -> bool:
+    return LLMClient.has_backend()
 
 
 def _long_transcript(n_turns: int = 14) -> list[TranscriptTurn]:
@@ -190,6 +207,103 @@ class TestLazyLoading(unittest.TestCase):
         )
         self.assertEqual(loaded, ["current goal: resolve the refund question"])
         self.assertEqual(deferred, ["pointer:past episodes"])
+
+
+class TestSummariserHonesty(unittest.TestCase):
+    """The offline paths must not present a head excerpt as a summary."""
+
+    def test_default_summarise_strategy_labels_its_output_an_excerpt(self):
+        pruned = prune_tool_result("invoice line: INV-1001 $480, " * 200)
+        self.assertIn("not a model summary", pruned.text)
+        self.assertLess(pruned.tokens_after, pruned.tokens_before)
+
+    def test_prune_uses_a_supplied_summariser(self):
+        # A test double for the summariser callable interface only:
+        # it proves prune_tool_result calls the summariser it is
+        # given. The real model behind that interface is covered by
+        # the live tests below, not by this double.
+        pruned = prune_tool_result(
+            "invoice line: INV-1001 $480, " * 200,
+            strategy="summarise",
+            summariser=lambda text: "SUMMARY: business plan, renewal 2027-03-01.",
+        )
+        self.assertEqual(pruned.text, "SUMMARY: business plan, renewal 2027-03-01.")
+        self.assertLess(pruned.tokens_after, pruned.tokens_before)
+
+    def test_compress_stage_two_labels_its_excerpt(self):
+        budget = TokenBudget(total_tokens=4000, task_type="default")
+        items = [("record " + "detail, " * 200, 1000), ("other " + "detail, " * 200, 1000)]
+        fitted = budget.compress(items, 50)
+        self.assertTrue(all("EXCERPT" in text for text, _ in fitted))
+
+
+class TestEmbedderHook(unittest.TestCase):
+    """The store accepts a real embedding callable at one swap point."""
+
+    def test_store_uses_the_supplied_embedder(self):
+        calls: list[str] = []
+
+        def counting_embedder(text: str) -> list[float]:
+            calls.append(text)
+            return [1.0 if "refund" in text else 0.0, 0.0]
+
+        store = MemoryStore(":memory:", embedder=counting_embedder)
+        store.write_episode(
+            "acme", "Refund policy question from a customer.",
+            source="ticket-1", importance=0.8, expected_reuse=0.8)
+        store.retrieve("acme", "refund policy", tier=Tier.EPISODIC)
+        self.assertIn("Refund policy question from a customer.", calls)
+        self.assertIn("refund policy", calls)
+        store.close()
+
+    def test_default_store_still_uses_the_stand_in(self):
+        store = MemoryStore(":memory:")
+        memory, verdict = store.write_episode(
+            "acme", "Ticket 101: refunded a late delivery within 14 days.",
+            source="ticket-101", importance=0.8, expected_reuse=0.8)
+        self.assertTrue(verdict.admitted)
+        self.assertEqual(len(memory.embedding), 64)
+        store.close()
+
+
+@unittest.skipUnless(_llm_available(), "needs a configured LLM backend")
+class TestLiveCompaction(unittest.TestCase):
+    """Live tests: real model compaction against the real model."""
+
+    def test_live_compaction_preserves_load_bearing_facts(self) -> None:
+        client = LLMClient()
+        facts = [
+            "Refund policy is 14 days with manager approval (June).",
+            "Customer's plan is business, renewal 2027-03-01.",
+            "Tried re-issuing the invoice; it did not resolve the error.",
+        ]
+        state = compact_with_llm(client, _long_transcript(), facts)
+        self.assertTrue(state.complete)
+        self.assertEqual(state.load_bearing_missing, [])
+        for fact in facts:
+            self.assertIn(fact, state.summary)
+        self.assertLess(state.tokens_after, state.tokens_before)
+
+
+@unittest.skipUnless(_llm_available(), "needs a configured LLM backend")
+class TestLivePruning(unittest.TestCase):
+    """Live tests: real model tool-result summarisation."""
+
+    def test_live_summarise_keeps_the_figures_the_next_step_needs(self) -> None:
+        client = LLMClient()
+        record = "\n".join(
+            [
+                "plan: business",
+                "renewal date: 2027-03-01",
+                "seats: 42",
+                "past invoices: " + "INV-1001 $480, " * 40,
+                "usage notes: " + "daily sync at 02:00, " * 40,
+            ]
+        )
+        pruned = prune_tool_result_with_llm(client, record, strategy="summarise")
+        self.assertLess(pruned.tokens_after, pruned.tokens_before)
+        self.assertIn("business", pruned.text.lower())
+        self.assertIn("2027-03-01", pruned.text)
 
 
 if __name__ == "__main__":

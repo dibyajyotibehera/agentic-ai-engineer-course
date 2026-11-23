@@ -16,7 +16,9 @@ are refused with a clear message rather than accepted and lost.
 Those bounds are chosen defaults for the exercise, not measured
 results.
 
-No API key or paid service is needed.
+No API key or paid service is needed. There is no model stand-in
+in this file at all: the queue is real SQLite on disk, and the
+replay handler is real local execution.
 Run:  python offline_queue.py
 """
 

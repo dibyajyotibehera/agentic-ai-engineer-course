@@ -26,6 +26,14 @@ rules the lesson argues for, in about a hundred lines:
     token in a checkpoint is a credential sitting in a database backup, so
     ``to_json()`` refuses to serialise any key whose name looks secret.
 
+The blob store here is a real directory on disk, not an in-memory dict:
+``BlobStore.put`` writes real bytes to a real file and ``get`` reads them
+back. It stands in for object storage (Amazon S3, a database, a file
+store) only in the sense that it is local disk rather than a service; the
+claim-check mechanics it demonstrates — the key in state, the payload on
+disk, the snapshot staying small — are the real ones, and the demo proves
+them against a real 50-megabyte file.
+
 Run the file to see all three rules exercised, including the failure modes:
 an unknown version is rejected, and a secret smuggled into state raises
 instead of being written.
@@ -34,7 +42,9 @@ instead of being written.
 from __future__ import annotations
 
 import json
+import tempfile
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 CURRENT_VERSION = 2
 
@@ -127,21 +137,45 @@ def migrate_v1_to_v2(payload: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# The claim-check pattern: big payloads live outside state.
+# The claim-check pattern: big payloads live outside state, on real disk.
 # ---------------------------------------------------------------------------
 
 class BlobStore:
-    """A stand-in for object storage (Amazon S3, a database, a file store)."""
+    """A file-backed blob store: the claim-check pattern against real files.
 
-    def __init__(self) -> None:
-        self._blobs: dict[str, bytes] = {}
+    ``put`` writes real bytes to a real file under ``directory`` and
+    returns the key; ``get`` reads the file back. Keys look like
+    ``blob://exports/workspace-7.csv`` — the ``blob://`` scheme is stripped
+    and the rest is the path under the store directory. A key that would
+    escape the directory (``..`` or an absolute path) is refused, because
+    a store that lets a key walk the filesystem is a path-traversal bug,
+    not a store.
+
+    This is local disk, not Amazon S3 — but the mechanics the chapter is
+    teaching are the same ones a service-backed store has: the payload
+    lives outside state, the key is the only thing state carries, and
+    reading the payload back is a separate step from loading the state.
+    """
+
+    def __init__(self, directory: str | Path) -> None:
+        self.directory = Path(directory)
+        self.directory.mkdir(parents=True, exist_ok=True)
+
+    def _path_for(self, key: str) -> Path:
+        relative = key[7:] if key.startswith("blob://") else key
+        candidate = (self.directory / relative).resolve()
+        if candidate != self.directory and self.directory.resolve() not in candidate.parents:
+            raise ValueError(f"blob key escapes the store directory: {key!r}")
+        return candidate
 
     def put(self, key: str, data: bytes) -> str:
-        self._blobs[key] = data
+        path = self._path_for(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
         return key
 
     def get(self, key: str) -> bytes:
-        return self._blobs[key]
+        return self._path_for(key).read_bytes()
 
 
 def demo() -> None:
@@ -164,12 +198,21 @@ def demo() -> None:
     print("migrated to v2:", migrated.tickets)
 
     print("\n== 3. Claim check: the document stays out of state ==")
-    store = BlobStore()
-    key = store.put("blob://exports/workspace-7.csv", b"x" * 50_000_000)
-    state.attachments["export"] = key
-    snapshot = state.to_json()
-    print(f"snapshot with a 50 MB attachment is still {len(snapshot)} bytes")
-    assert "x" * 100 not in snapshot, "payload leaked into state"
+    with tempfile.TemporaryDirectory(prefix="ch01-blob-store-") as tmpdir:
+        store = BlobStore(tmpdir)
+        payload = b"x" * 50_000_000  # a real 50 MB file, not a dict entry
+        key = store.put("blob://exports/workspace-7.csv", payload)
+        state.attachments["export"] = key
+        snapshot = state.to_json()
+        print(f"blob written to {tmpdir}/exports/workspace-7.csv "
+              f"({len(payload):,} bytes on disk)")
+        print(f"snapshot with a 50 MB attachment is still {len(snapshot)} bytes")
+        assert "x" * 100 not in snapshot, "payload leaked into state"
+        retrieved = store.get(key)
+        assert retrieved == payload, "blob read back differs from what was stored"
+        print(f"blob read back OK: {len(retrieved):,} bytes, contents match")
+        # The temporary directory — and the 50 MB file with it — is
+        # removed when the demo exits, so the repo stays clean.
 
     print("\n== 4. Failure modes ==")
     for label, bad in [

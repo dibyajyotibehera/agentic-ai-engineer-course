@@ -1,0 +1,12 @@
+{
+  "cust-001": {
+    "account_status": "active",
+    "plan": "annual",
+    "renewal_date": "2026-03-14"
+  },
+  "cust-002": {
+    "account_status": "past-due",
+    "plan": "monthly",
+    "renewal_date": "2026-11-30"
+  }
+}

@@ -1,34 +1,42 @@
 """Latency profiler for the support copilot (Chapter 12).
 
-Wraps an agent run, records the wall-clock time of every step and every
-tool call, and prints a flame-graph-style breakdown: each step is a bar whose
-length is its share of the total time, so the dominant cost is visible at a
-glance. It also reports the distribution across many runs — mean, median,
-95th percentile, and maximum — because a teardown must show the slow tail,
-not just the average.
+Wraps a real agent run, records the wall-clock time of every step and
+every tool call, and prints a flame-graph-style breakdown: each step
+is a bar whose length is its share of the total time, so the dominant
+cost is visible at a glance. It also reports the distribution across
+many runs — mean, median, 95th percentile, and maximum — because a
+teardown must show the slow tail, not just the average.
 
-The profiler is framework-neutral: wrap any callable step with ``profile()``
-or decorate it with ``@span``. The ``run_mock_copilot()`` demo simulates one
-support ticket (four Model Context Protocol tools fanning out, a ReAct loop
-of model calls, and a judge call) with ``time.sleep`` standing in for real
-work, so the file runs with no model API key and no paid service. Point the
-profiler at your real agent run for real numbers.
+The profiler is framework-neutral: wrap any callable step with
+``profile()`` or decorate it with ``@span``. The demo profiles the
+real copilot in ``copilot.py`` — a plan call and a draft call to a
+real model, four local tools fanning out in parallel, and a judge
+call on the cheap route — so it needs a model backend (``LLM_API_KEY``
+or ``LLM_BACKEND=opencheap-connector``) and it reports real numbers:
+the run total is wall-clock time, and the parallel fan-out costs the
+slowest member, not the sum, because the tools really run
+concurrently under a thread pool.
 
-Serving threshold from Chapter 11, used by the report: an alert fires when
-95th-percentile latency rises above 2 seconds.
+Serving threshold from Chapter 11, used by the report: an alert fires
+when 95th-percentile latency rises above 2 seconds.
 
 Usage:
-    python latency_profiler.py
+    LLM_BACKEND=opencheap-connector python latency_profiler.py [--runs N] [--sequential]
 """
 
 from __future__ import annotations
 
+import argparse
 import statistics
+import threading
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TypeVar
+
+from copilot import TICKETS, run_copilot
+from llm_client import LLMClient
 
 T = TypeVar("T")
 
@@ -52,31 +60,56 @@ class RunProfile:
 
     run_id: str
     spans: list[Span] = field(default_factory=list)
+    # Wall-clock time of the whole run, when the profiler measured it.
+    # The total is the wall time, not the sum of the spans: parallel
+    # spans overlap, so their sum would overstate a fanned-out run.
+    wall_seconds: float | None = None
 
     @property
     def total_seconds(self) -> float:
+        if self.wall_seconds is not None:
+            return self.wall_seconds
         return sum(s.duration_seconds for s in self.spans)
 
     def flame_graph(self, width: int = 40) -> str:
         """Render a text flame-graph-style breakdown of the run."""
         total = self.total_seconds
-        lines = [f"Run {self.run_id}: {total:.2f}s total"]
+        lines = [f"Run {self.run_id}: {total:.2f}s total (wall clock)"]
         for span in sorted(self.spans, key=lambda s: -s.duration_seconds):
             share = span.duration_seconds / total if total else 0.0
-            bar = "#" * max(1, round(share * width))
+            bar = "#" * max(1, min(width, round(share * width)))
             tag = " (parallel)" if span.parallel else ""
             lines.append(
                 f"  {span.name:<28} {bar:<{width}} "
                 f"{span.duration_seconds:5.2f}s {share:5.1%}{tag}"
             )
+        if any(s.parallel for s in self.spans):
+            lines.append(
+                "  (parallel spans overlap, so their shares can sum past 100%;"
+                " the total above is wall-clock time)"
+            )
         return "\n".join(lines)
 
 
 class Profiler:
-    """Collects spans for one agent run. Use as a context manager per run."""
+    """Collects spans for one agent run. Use as a context manager per run.
+
+    Thread-safe: the copilot's tool fan-out records spans from worker
+    threads, so appends are guarded by a lock.
+    """
 
     def __init__(self, run_id: str) -> None:
         self.profile = RunProfile(run_id=run_id)
+        self._lock = threading.Lock()
+        self._start: float | None = None
+
+    def __enter__(self) -> "Profiler":
+        self._start = time.perf_counter()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if self._start is not None:
+            self.profile.wall_seconds = time.perf_counter() - self._start
 
     @contextmanager
     def span(self, name: str, parallel: bool = False):
@@ -85,9 +118,10 @@ class Profiler:
         try:
             yield
         finally:
-            self.profile.spans.append(
-                Span(name, time.perf_counter() - start, parallel=parallel)
-            )
+            with self._lock:
+                self.profile.spans.append(
+                    Span(name, time.perf_counter() - start, parallel=parallel)
+                )
 
     def time_call(self, name: str, fn: Callable[..., T], *args, **kwargs) -> T:
         """Time a callable and return its result."""
@@ -142,67 +176,68 @@ def slowest_step(profiles: list[RunProfile]) -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# Mock copilot: a simulated ticket, so the profiler runs with no API key.
-# time.sleep stands in for real model calls and tool calls; the shape of the
-# run — fan-out of four tools, then a loop of model calls, then a judge —
-# is the real copilot's shape.
-# ---------------------------------------------------------------------------
+def profile_many(
+    client: LLMClient,
+    n_runs: int,
+    tickets: list[dict],
+    *,
+    parallel: bool = True,
+) -> tuple[list[RunProfile], list]:
+    """Profile the real copilot over n_runs, cycling through the tickets.
 
-def _sleep(seconds: float) -> None:
-    time.sleep(seconds)
-
-
-def run_mock_copilot(profiler: Profiler, ticket: str) -> str:
-    """Simulate one support-copilot ticket. Returns a mock resolution."""
-    with profiler.span("model: plan ticket", parallel=False):
-        _sleep(0.35)
-    # Four Model Context Protocol tools fan out per ticket. They run
-    # concurrently in the real copilot, so they are marked parallel; the
-    # wall-clock cost of the fan-out is the slowest member, not the sum.
-    with profiler.span("tool: account_state", parallel=True):
-        _sleep(0.30)
-    with profiler.span("tool: subscription_status", parallel=True):
-        _sleep(0.25)
-    with profiler.span("tool: knowledge_base_search", parallel=True):
-        _sleep(0.40)
-    with profiler.span("tool: refund_eligibility", parallel=True):
-        _sleep(0.90)  # slowest member: waits on a synchronous billing service
-    with profiler.span("model: draft resolution", parallel=False):
-        _sleep(0.45)
-    with profiler.span("judge: grade resolution", parallel=False):
-        _sleep(0.20)
-    return f"resolved: {ticket}"
-
-
-def profile_many(n_runs: int, tickets: list[str]) -> list[RunProfile]:
-    """Profile the mock copilot over n_runs, cycling through the tickets."""
+    Returns the profiles and the copilot runs (which carry the measured
+    token counts and the judge verdicts). Each run is three model calls
+    — plan, draft, judge — so keep n_runs small; the default of three
+    runs is nine model calls.
+    """
     profiles = []
+    runs = []
     for i in range(n_runs):
-        profiler = Profiler(run_id=f"run-{i + 1:02d}")
-        run_mock_copilot(profiler, tickets[i % len(tickets)])
+        with Profiler(run_id=f"run-{i + 1:02d}") as profiler:
+            run = run_copilot(
+                client, tickets[i % len(tickets)],
+                profiler=profiler, parallel=parallel,
+            )
         profiles.append(profiler.profile)
-    return profiles
+        runs.append(run)
+    return profiles, runs
 
 
 def main() -> None:
-    tickets = [
-        "refund for duplicate charge",
-        "subscription downgrade after renewal",
-        "cannot log in after password reset",
-        "invoice shows wrong billing address",
-        "feature request: export to spreadsheet",
-    ]
-    profiles = profile_many(20, tickets)
+    parser = argparse.ArgumentParser(
+        description="Profile the real support copilot's latency."
+    )
+    parser.add_argument("--runs", type=int, default=3,
+                        help="runs to profile (default 3; each run is "
+                        "three model calls, so keep this small)")
+    parser.add_argument("--sequential", action="store_true",
+                        help="run the four tools sequentially instead of "
+                        "in parallel, to measure the fan-out saving")
+    args = parser.parse_args()
+
+    client = LLMClient()  # raises loudly without a configured backend
+    mode = "sequential" if args.sequential else "parallel fan-out"
+    print(f"Profiling the real copilot: {args.runs} runs, {mode}")
+    profiles, runs = profile_many(
+        client, args.runs, TICKETS, parallel=not args.sequential
+    )
+    print()
     print(profiles[0].flame_graph())
     print()
     print(distribution_report(profiles))
     print(slowest_step(profiles))
     print()
-    print("Note: sleeps simulate sequential spans here, so the fan-out's four")
-    print("tools add up in this mock. In the real copilot they run in parallel")
-    print("and the fan-out costs the slowest member (refund_eligibility), not")
-    print("the sum — re-profile against the real run to show that difference.")
+    passes = sum(1 for run in runs if run.judge_pass)
+    print(f"Judge: {passes}/{len(runs)} drafts passed.")
+    for run in runs:
+        if not run.judge_pass:
+            print(f"  {run.ticket_id} failed the judge: {run.judge_reason}")
+    print(
+        f"Model usage for this run: {client.total_prompt_tokens} prompt "
+        f"tokens, {client.total_completion_tokens} completion tokens"
+        + (f", ${client.total_cost_usd:.4f}"
+           if client.total_cost_usd else "")
+    )
 
 
 if __name__ == "__main__":

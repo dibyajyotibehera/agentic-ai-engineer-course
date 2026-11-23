@@ -1,0 +1,77 @@
+{
+  "1": {
+    "role": "button",
+    "name": "Save draft",
+    "id": "save",
+    "centre": [
+      115.0,
+      122.0
+    ],
+    "box": [
+      40,
+      100,
+      150,
+      44
+    ]
+  },
+  "2": {
+    "role": "button",
+    "name": "Publish report",
+    "id": "publish",
+    "centre": [
+      127.5,
+      202.0
+    ],
+    "box": [
+      40,
+      180,
+      175,
+      44
+    ]
+  },
+  "3": {
+    "role": "input",
+    "name": "Search",
+    "id": "search",
+    "centre": [
+      225.0,
+      278.0
+    ],
+    "box": [
+      115,
+      258,
+      220,
+      40
+    ]
+  },
+  "4": {
+    "role": "button",
+    "name": "Export CSV",
+    "id": "export",
+    "centre": [
+      97.5,
+      354.0
+    ],
+    "box": [
+      40,
+      340,
+      115,
+      28
+    ]
+  },
+  "5": {
+    "role": "button",
+    "name": "?",
+    "id": "help",
+    "centre": [
+      54.0,
+      421.0
+    ],
+    "box": [
+      40,
+      410,
+      28,
+      22
+    ]
+  }
+}

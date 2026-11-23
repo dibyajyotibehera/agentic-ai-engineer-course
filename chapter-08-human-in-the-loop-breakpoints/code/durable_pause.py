@@ -8,8 +8,16 @@ answering survives the process being killed.
 The loop has three steps, and the checkpoint is written to SQLite
 (see ``store.py``) *before* each step boundary, never after:
 
-1. ``plan`` — a deterministic mock planner turns the task into a
-   proposed write (no model call, so this runs with no API key).
+1. ``plan`` — a real model call (see ``plan_write`` and
+   ``llm_client.py``, copied from Chapter 7) drafts the proposed
+   write as structured JSON. It needs a configured model backend
+   (``LLM_API_KEY`` or ``LLM_BACKEND=opencheap-connector``); without
+   one the run fails loudly instead of planning from a template,
+   because a template is a mock of the model and this chapter has
+   no mock models left. The deterministic tests inject a trivial
+   planner through ``run_agent``'s ``planner`` argument instead —
+   that fixture lives in the test file, tests only the pause and
+   resume properties, and never ships as production code.
 2. ``request_approval`` — the proposed write is recorded as a pending
    approval with a deadline, the run status becomes
    ``awaiting_approval``, and the process *exits*. Nothing is held in
@@ -33,10 +41,16 @@ Usage::
     python durable_pause.py resume --run-id run-xxxxxxxxxxxx
     python durable_pause.py audit --run-id run-xxxxxxxxxxxx
 
-The ``approve`` command is a command-line stand-in for the webhook
-decision endpoint in ``approval_server.py``; in production the human
-answers in Slack or Microsoft Teams and the decision arrives over
-Hypertext Transfer Protocol, never through a shell on the agent host.
+The ``approve`` command is a deliberate local stand-in for the
+webhook decision endpoint in ``approval_server.py``: it records
+exactly the decision a human would send from Slack or Microsoft
+Teams, through the same ``record_decision`` path, for runs where no
+chat account or endpoint is wired up. The human is external to this
+program, so a local way to record their answer is a fixture, not a
+mock of the model — the model is never involved in the decision.
+In production the human answers in Slack or Microsoft Teams and
+the decision arrives over Hypertext Transfer Protocol, never
+through a shell on the agent host.
 """
 
 from __future__ import annotations
@@ -47,6 +61,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sys
 import time
 import urllib.request
@@ -54,8 +69,18 @@ from pathlib import Path
 
 import store
 
+from llm_client import LLMClient, LLMError
+
 DEFAULT_APPROVAL_TIMEOUT_SECONDS = 15 * 60  # 15 minutes
 WRITE_OUTPUT_DIR = Path(__file__).resolve().parent / "out"
+
+# The write the model may propose is a single Markdown file under
+# ``out/``. The filename is validated, never trusted: a model that
+# could name an arbitrary path could propose a write outside the
+# gated directory, and the gate is supposed to bound the write, not
+# merely to ask about it.
+SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.md$")
+MAX_WRITE_CONTENT_CHARS = 4000
 
 
 def _now_iso(epoch: float) -> str:
@@ -126,30 +151,109 @@ def dispatch_approval_webhook(
         return {"delivered": False, "error": str(exc)}
 
 
-def plan_write(task: str) -> dict:
-    """Deterministic mock planner: task text in, proposed write out.
+def plan_write(task: str, client: LLMClient) -> dict:
+    """Ask the model to draft the proposed write for ``task``.
 
-    A real agent would call a language model here; the planning logic
-    is deliberately trivial so the pause, routing and audit behaviour
-    — the subject of this chapter — can be exercised with no model
-    and no API key. The proposed write is always a file write, which
-    is the write tool this chapter gates.
+    The model returns structured JSON with two fields: ``path``, the
+    filename to write under ``out/``, and ``content``, the Markdown
+    to write there. The cheap judge route (``:floor``) is used,
+    because drafting a short file is a small job, not a reasoning
+    task — but the token budget is kept generous, because a model
+    given too small a budget can spend it all on hidden reasoning
+    and return empty content (the same gotcha Chapter 7's demo
+    documents). If the model still returns an unusable reply, the
+    call is retried once; a second failure raises loudly instead of
+    planning from a template. The filename is validated against a
+    strict pattern and the content is length-capped: the model
+    proposes the write, but the gate bounds what a proposal may be,
+    so a surprising reply fails loudly instead of producing a
+    surprising file.
     """
-    filename = "changelog.md" if "changelog" in task.lower() else "output.md"
+    last_error = None
+    result = None
+    for _ in range(2):
+        try:
+            result = client.structured(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You draft the file an agent proposes to write. "
+                            "Reply with a JSON object with exactly two fields: "
+                            '"path", a plain Markdown filename such as '
+                            '"changelog.md" (no directories, no absolute path), '
+                            'and "content", the Markdown text of the file. '
+                            "Write for the task as given; keep the content short "
+                            "and factual."
+                        ),
+                    },
+                    {"role": "user", "content": f"Task: {task}"},
+                ],
+                model=client.judge_model,
+                temperature=0.0,
+                max_tokens=1500,
+                required_fields=("path", "content"),
+            )
+            break
+        except LLMError as error:
+            last_error = error
+    else:
+        raise last_error  # noqa: B904 — the error is the model's reply
+    assert result is not None  # the loop either breaks with a result or raises
+    path = str(result["path"]).strip()
+    content = str(result["content"])
+    if not SAFE_FILENAME_RE.match(path):
+        raise LLMError(
+            f"Model proposed an unsafe write path: {path!r}. "
+            "The path must be a plain Markdown filename."
+        )
+    if not content.strip():
+        raise LLMError("Model proposed an empty write.")
+    if len(content) > MAX_WRITE_CONTENT_CHARS:
+        raise LLMError(
+            f"Model proposed a write of {len(content)} characters, over "
+            f"the {MAX_WRITE_CONTENT_CHARS}-character cap for a gated write."
+        )
     return {
         "tool": "write_file",
         "risk": "high",  # every write through this gate is high risk
-        "path": filename,
-        "content": f"# Agent output\n\nTask: {task}\n",
+        "path": path,
+        "content": content,
         "idempotency_key": hashlib.sha256(task.encode("utf-8")).hexdigest()[:16],
     }
 
 
 def run_agent(
-    conn, task: str, *, approver: str, timeout_seconds: int
+    conn, task: str, *, approver: str, timeout_seconds: int,
+    client: LLMClient | None = None,
+    planner=None,
 ) -> dict:
-    """Plan, then pause durably before the write. Returns the run."""
-    state = {"step": "planned", "task": task, "write": plan_write(task)}
+    """Plan, then pause durably before the write. Returns the run.
+
+    ``planner`` is an optional ``task -> write`` callable, used by
+    the deterministic tests so they can exercise the pause, the
+    resume and the audit trail without a model. Production runs
+    leave it unset and the plan step calls the real model through
+    ``client`` (or a client built from the environment, which raises
+    a loud error when no backend is configured).
+    """
+    if planner is None:
+        client = client or LLMClient()
+        before_prompt = client.total_prompt_tokens
+        before_completion = client.total_completion_tokens
+        before_cost = client.total_cost_usd
+        write = plan_write(task, client)
+        usage = {
+            "prompt_tokens": client.total_prompt_tokens - before_prompt,
+            "completion_tokens": client.total_completion_tokens - before_completion,
+            "cost_usd": round(client.total_cost_usd - before_cost, 6),
+        }
+    else:
+        write = planner(task)
+        usage = None
+    state = {"step": "planned", "task": task, "write": write}
+    if usage is not None:
+        state["model_usage"] = usage
     run_id = store.create_run(conn, task, state)
     now = time.time()
     approval = {
@@ -183,7 +287,8 @@ def run_agent(
     if webhook_url:
         delivery = dispatch_approval_webhook(conn, run_id, approval, webhook_url)
     return {"run_id": run_id, "status": "awaiting_approval",
-            "approval": approval, "webhook_delivery": delivery}
+            "approval": approval, "webhook_delivery": delivery,
+            "model_usage": usage}
 
 
 def record_decision(
@@ -316,6 +421,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--db", default=str(store.default_db_path()),
                         help="SQLite store path (default: code/hitl.db)")
+    parser.add_argument("--backend", default=None,
+                        help="LLM backend: env (default) or opencheap-connector")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_run = sub.add_parser("run", help="Plan a task, then pause for approval")
@@ -341,12 +448,29 @@ def main(argv: list[str] | None = None) -> int:
     p_audit.add_argument("--run-id", required=True)
 
     args = parser.parse_args(argv)
+    if args.backend:
+        os.environ["LLM_BACKEND"] = args.backend
     conn = store.connect(args.db)
 
     if args.command == "run":
-        result = run_agent(conn, args.task, approver=args.approver,
-                           timeout_seconds=args.timeout_seconds)
+        try:
+            result = run_agent(conn, args.task, approver=args.approver,
+                               timeout_seconds=args.timeout_seconds)
+        except LLMError as error:
+            print(f"Cannot plan the run: {error}", file=sys.stderr)
+            print("Set LLM_API_KEY (and optionally LLM_BASE_URL and "
+                  "LLM_MODEL), or run with --backend "
+                  "opencheap-connector.", file=sys.stderr)
+            return 2
         print(json.dumps(result, indent=2))
+        usage = result.get("model_usage")
+        if usage is not None:
+            print(
+                f"\nPlanning used {usage['prompt_tokens']} prompt tokens"
+                f" and {usage['completion_tokens']} completion tokens"
+                + (f" (${usage['cost_usd']:.4f})" if usage["cost_usd"] else "")
+                + "."
+            )
         print("\nThe agent is paused. The process can now exit safely —")
         print("the run will resume from the database, not from memory.")
         return 0

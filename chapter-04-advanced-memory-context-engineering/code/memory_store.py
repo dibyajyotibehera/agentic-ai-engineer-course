@@ -31,11 +31,27 @@ Design rules enforced by this module, not left to convention:
 Embeddings here are a deterministic stand-in, not a real embedding model:
 :func:`fake_embed` hashes the text into a fixed-length vector so that
 similar texts get similar vectors well enough for the exercises to behave.
-Swap it for a real embedding call (for example OpenAI's
-text-embedding-3-small, $0.02 per 1M tokens -- see ``token_budget.py``)
-without changing any other code: only ``embed_text`` needs to change.
+That stand-in stays deliberately, and the reason is verified, not assumed:
+the OpenCheap router this course runs against lists only the chat model
+``kimi-k3.1-pro`` (``list-models`` returns one model, kind ``chat``), and
+its ``/embeddings`` endpoint answers 404, so there is no cheap real
+embedding model available to this chapter in this environment, and no
+local embedding model is installed here either. The stand-in is therefore
+the honest offline default, and it is never presented as an embedding:
+it is named ``fake_embed``, and every similarity threshold tuned for it
+says so in its comment. The single swap point is :func:`embed_text`:
+pass a real embedding callable to ``MemoryStore(embedder=...)`` and
+every write, duplicate check, conflict check and retrieval uses it
+without any other code changing. The production replacement is a real
+embedding model -- for example OpenAI's text-embedding-3-small, $0.02
+per 1M tokens, 1,536 dimensions (see ``token_budget.py`` and
+``pgvector_schema.sql``, whose ``vector(1536)`` column matches it) --
+and with a real model the conflict threshold in ``_resolve_conflicts``
+should move from 0.60 to around 0.85, as the comment there says.
 
-No API key and no paid service are needed to run this module.
+No API key and no paid service are needed to run this module with the
+stand-in embeddings. Passing a real ``embedder`` is the caller's
+choice, and the embedder owns its own credentials.
 """
 
 from __future__ import annotations
@@ -72,6 +88,10 @@ def fake_embed(text: str, dimensions: int = DIMENSIONS) -> list[float]:
     Each word contributes to a few hashed buckets, so texts sharing words
     end up close together under cosine similarity. Good enough for the
     exercises; replace with a real embedding model in production.
+    A hash is not an embedding: it carries no meaning beyond shared
+    words, so paraphrases with different words score low against each
+    other, which is why the conflict threshold below is 0.60 instead
+    of the ~0.85 a real embedding model would use.
     """
     vector = [0.0] * dimensions
     for word in re.findall(r"[a-z0-9]+", text.lower()):
@@ -81,6 +101,21 @@ def fake_embed(text: str, dimensions: int = DIMENSIONS) -> list[float]:
             vector[bucket] += 1.0
     norm = math.sqrt(sum(v * v for v in vector)) or 1.0
     return [v / norm for v in vector]
+
+
+def embed_text(text: str, dimensions: int = DIMENSIONS, embedder=None) -> list[float]:
+    """The single swap point for embeddings.
+
+    With ``embedder=None`` this returns the deterministic stand-in
+    :func:`fake_embed`. Pass a real embedding callable -- a function
+    taking one text and returning a list of floats, for example a
+    wrapper around an embedding-model API call -- and that callable
+    is used instead, everywhere in the store. Only this function
+    needs to change when the store moves to production embeddings.
+    """
+    if embedder is not None:
+        return embedder(text)
+    return fake_embed(text, dimensions)
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -169,10 +204,12 @@ class WriteGate:
         min_score: float = 0.25,
         duplicate_threshold: float = 0.85,
         store: "MemoryStore | None" = None,
+        embedder=None,
     ) -> None:
         self.min_score = min_score
         self.duplicate_threshold = duplicate_threshold
         self.store = store
+        self.embedder = embedder  # real embedding callable, or None for the stand-in
         self.log: list[dict] = []  # auditable verdict history
 
     def score(self, importance: float, expected_reuse: float) -> float:
@@ -222,7 +259,10 @@ class WriteGate:
             for existing in self.store.list_memories(tenant_id, tier):
                 if existing.status is MemoryStatus.SUPERSEDED:
                     continue
-                sim = cosine_similarity(fake_embed(text), existing.embedding or fake_embed(existing.text))
+                sim = cosine_similarity(
+                    embed_text(text, embedder=self.embedder),
+                    existing.embedding or embed_text(existing.text, embedder=self.embedder),
+                )
                 if sim >= self.duplicate_threshold:
                     return GateVerdict(False, "duplicate", f"near-duplicate of memory {existing.id} (similarity {sim:.2f})")
         if self.score(importance, expected_reuse) < self.min_score:
@@ -317,14 +357,21 @@ class MemoryStore:
         path: str | Path = ":memory:",
         gate: WriteGate | None = None,
         eviction: EvictionPolicy | None = None,
+        embedder=None,
     ) -> None:
         self.path = str(path)
         self.conn = sqlite3.connect(self.path)
         self.conn.executescript(SCHEMA)
         self.conn.commit()
-        self.gate = gate or WriteGate(store=self)
+        self.embedder = embedder  # real embedding callable, or None for the stand-in
+        self.gate = gate or WriteGate(store=self, embedder=embedder)
         self.gate.store = self
+        self.gate.embedder = embedder
         self.eviction = eviction or EvictionPolicy()
+
+    def _embed(self, text: str) -> list[float]:
+        """Embed one text with the configured embedder, or the stand-in."""
+        return embed_text(text, embedder=self.embedder)
 
     # -- working tier ------------------------------------------------------
 
@@ -370,7 +417,7 @@ class MemoryStore:
             return None, verdict
         memory = Memory(
             tenant_id=tenant_id, tier=Tier.EPISODIC, text=text, source=source,
-            importance=importance, embedding=fake_embed(text), expires_at=expires_at,
+            importance=importance, embedding=self._embed(text), expires_at=expires_at,
         )
         memory = self._insert(memory)
         self._enforce_cap(tenant_id, Tier.EPISODIC)
@@ -400,7 +447,7 @@ class MemoryStore:
             return None, verdict
         memory = Memory(
             tenant_id=tenant_id, tier=Tier.SEMANTIC, text=text, source=source,
-            authority=authority, importance=importance, embedding=fake_embed(text),
+            authority=authority, importance=importance, embedding=self._embed(text),
         )
         memory = self._insert(memory)
         self._resolve_conflicts(memory)
@@ -411,7 +458,7 @@ class MemoryStore:
         for old in self.list_memories(new.tenant_id, Tier.SEMANTIC):
             if old.id == new.id or old.status is not MemoryStatus.CURRENT:
                 continue
-            sim = cosine_similarity(new.embedding, old.embedding or fake_embed(old.text))
+            sim = cosine_similarity(new.embedding, old.embedding or self._embed(old.text))
             if sim < 0.60:
                 # Threshold tuned for the stand-in embeddings in this module,
                 # which give lower similarities than a real embedding model
@@ -446,12 +493,12 @@ class MemoryStore:
         of similarity, recency and importance. Updates access statistics."""
         if not tenant_id:
             raise ValueError("tenant_id is required")
-        query_vec = fake_embed(query)
+        query_vec = self._embed(query)
         scored: list[tuple[Memory, float]] = []
         for memory in self.list_memories(tenant_id, tier):
             if memory.status is MemoryStatus.SUPERSEDED:
                 continue
-            vec = memory.embedding or fake_embed(memory.text)
+            vec = memory.embedding or self._embed(memory.text)
             similarity = cosine_similarity(query_vec, vec)
             scored.append((memory, self.eviction.rank_for_retrieval(memory, similarity)))
         scored.sort(key=lambda pair: pair[1], reverse=True)

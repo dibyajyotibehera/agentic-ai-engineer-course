@@ -4,9 +4,14 @@ Run from the chapter directory:
 
     python code/demo_supervisor.py
 
-No model API key is needed: the workers are deterministic stubs (see
-``swarm.py``). The demo prints the supervisor's structured trace — one line
-per handoff — and the drafter's reply with its provenance notes.
+No model API key is needed: the workers are deterministic on purpose
+(see ``swarm.py``) — the lesson here is the topology and the handoff
+mechanics, and deterministic workers keep that lesson runnable and
+repeatable offline. The researcher reads the real ``accounts.json``
+file, so the lookup is real local execution, not an in-memory stand-in.
+For the same swarm with real model-backed workers (a model sentiment
+scorer and a model drafter), run ``code/demo_live_swarm.py`` instead,
+which needs a configured model backend.
 """
 
 from swarm import (

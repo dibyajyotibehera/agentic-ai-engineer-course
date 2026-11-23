@@ -1,5 +1,7 @@
 # Agentic AI Engineer Course
 
+[![Checks](https://github.com/dibyajyotibehera/agentic-ai-engineer-course/actions/workflows/ci.yml/badge.svg)](https://github.com/dibyajyotibehera/agentic-ai-engineer-course/actions/workflows/ci.yml)
+
 A hands-on course for building production-grade AI agents, in the style of [the LLM course](https://github.com/mlabonne/llm-course): each chapter is a lesson with theory, runnable code, exercises and references. It is written for an advanced practitioner — an experienced engineer with production agentic-AI experience — not a beginner.
 
 ## Who this course is for
@@ -36,15 +38,21 @@ Work the chapters in order: each one builds on the last, and Chapter 12 is a cap
 | 11 | [Graceful Degradation & Fallbacks](chapter-11-graceful-degradation-fallbacks/) | Keep an agent useful when a model, a tool or a budget fails, with circuit breakers and cost kill-switches |
 | 12 | [Public Agent Teardowns & Portfolios](chapter-12-public-agent-teardowns-portfolios/) | Tear down a real agent in public: architecture decision records, cost-per-task analysis and latency profiling |
 
-## Setup
-
-Python 3.11 or later. Each chapter's `code/` directory lists its own dependencies; most chapters run with nothing more than the standard library plus a small set of packages. Where a chapter needs a model API key (for example to call a hosted model), the code is written so it runs against a mock or a local model first, and the exercise says so explicitly. No chapter requires a paid service to complete its core exercise.
+## Quick start
 
 ```bash
+git clone https://github.com/dibyajyotibehera/agentic-ai-engineer-course.git
+cd agentic-ai-engineer-course
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt   # per-chapter requirements live in each chapter's code/ directory
+python scripts/run_checks.py   # every chapter's test suite, one command
 ```
+
+To work a chapter, go into its `code/` directory and follow that chapter's README: most chapters run on the standard library alone, and a chapter that needs a package lists it in its own `code/requirements.txt`. Where a chapter needs a model API key (Chapter 7's live demo and tests), the code reads it from the environment and the live tests skip when no key is configured; the deterministic tests need no key. No chapter requires a paid service to complete its core exercise.
+
+## Setup
+
+Python 3.11 or later. Each chapter's `code/` directory lists its own dependencies; most chapters run with nothing more than the standard library plus a small set of packages.
 
 ## Where this course comes from
 
@@ -61,16 +69,3 @@ This is a learning repository. Corrections to facts, links and code are welcome 
 ## Licence
 
 This course is released under the MIT Licence — see [LICENSE](LICENSE). Material adapted from Microsoft's AI Agents for Beginners is used under its MIT Licence with attribution in [CONVERSION_PLAN.md](CONVERSION_PLAN.md) and in the relevant chapters.
-
-## Pushing to GitHub
-
-This repository was built locally and has not been pushed anywhere. Once a GitHub account is connected, publish it with:
-
-```bash
-cd agentic-ai-engineer-course
-git remote add origin git@github.com:<your-username>/agentic-ai-engineer-course.git
-git branch -M main
-git push -u origin main
-```
-
-Replace `<your-username>` with your GitHub username, or use an HTTPS remote (`https://github.com/<your-username>/agentic-ai-engineer-course.git`) if you prefer to authenticate that way.

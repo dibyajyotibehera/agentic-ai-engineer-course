@@ -117,7 +117,14 @@ def serve_page(html: str):
 
 
 class ProductApi:
-    """Mock structured API: returns typed products, or fails with 503."""
+    """Structured API: returns typed products, or fails with 503.
+
+    The API itself is a small local stand-in, deliberately: it is
+    the dependency whose failure is injected, and the thing being
+    studied is the fallback to the browser path, which is real --
+    a plain HTTP fetch of a locally served page, extracted and
+    validated into the same typed structure.
+    """
 
     def __init__(self, fail_with_503: bool = False) -> None:
         self.fail_with_503 = fail_with_503

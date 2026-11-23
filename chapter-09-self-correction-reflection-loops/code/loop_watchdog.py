@@ -29,19 +29,23 @@ Two honest labels, stated up front:
 * The evaluator score is whatever your verifier already produces — a
   test pass rate, a retrieval grade, a rubric score. The watchdog does
   not invent a score; if you pass ``score=None`` it simply skips the
-  progress checks that need one, and says so in its reasons.
+  progress checks that need one, and says so in its reasons. Demo (d)
+  below wires this up for real: it runs the critic loop from
+  ``critic_agent.py`` against a real model and feeds each round's test
+  pass rate into the watchdog as the score.
 
-TODO: plug in a real model in two places only. First, replace
+TODO: plug in a real model in one place only — replace
 ``_semantic_similarity`` with embedding cosine similarity (any embedding
 model; the function signature stays ``(a, b) -> float`` in ``[0, 1]``).
-Second, replace the scripted evaluator scores in the demo with the
-verifier from ``self_healing_loop.py`` or the critic from
-``critic_agent.py`` — the watchdog accepts whatever score those
-already return. Nothing else in this module changes.
+Nothing else in this module changes. The similarity proxy is a labelled
+stand-in, not a hidden one: the docstring on ``_semantic_similarity``
+states exactly what it can and cannot tell apart, and the threshold is
+marked for re-tuning when real embeddings replace it.
 
 Run the module directly to see three loops through the watchdog's eyes:
 a converging loop it lets finish, an oscillating loop it stops, and a
-ping-pong delegation it stops:
+ping-pong delegation it stops — plus a fourth demo, live, in which the
+watchdog observes a real critic loop repairing a median function:
 
     python loop_watchdog.py
 """
@@ -415,8 +419,14 @@ class LoopWatchdog:
 
 
 # ---------------------------------------------------------------------------
-# Demos — scripted stand-ins, no model, no API key
+# Demos — fixed example trajectories, no model, no API key
 # ---------------------------------------------------------------------------
+# Demos (a)–(c) feed the watchdog observations directly. That is not a
+# stand-in for a model: observations are the watchdog's input, and the
+# trajectories are the worked examples the chapter text reasons about —
+# a converging loop, an oscillating loop, a ping-pong delegation. Demo
+# (d) below is the live counterpart: the same watchdog observing a real
+# critic loop, with the test pass rate as the evaluator score.
 
 # (a) A converging loop: each draft is genuinely different, the score
 # climbs 0.40 -> 0.65 -> 0.85 -> 0.95, and the watchdog lets it finish.
@@ -462,6 +472,64 @@ def _run_demo(title: str, observations: list[AttemptObservation]) -> None:
     print()
 
 
+def _run_demo_d_live() -> None:
+    """Demo (d): the watchdog observes a real critic loop, live.
+
+    The critic loop from ``critic_agent.py`` runs against a real model,
+    repairing the buggy median draft; after each round the watchdog
+    observes the draft with the round's test pass rate as the evaluator
+    score. A converging repair should earn continue verdicts all the
+    way through. Needs a configured model backend; skipped otherwise,
+    so the deterministic demos above still run with no model and no key.
+    """
+    print("=== Demo (d): the watchdog watches a real critic loop ===")
+    from llm_client import LLMClient  # noqa: PLC0415 - live demo only
+
+    if not LLMClient.has_backend():
+        print("Skipped — needs a configured model backend (LLM_API_KEY, or "
+              "LLM_BACKEND=opencheap-connector).")
+        print()
+        return
+    from critic_agent import (  # noqa: PLC0415 - live demo only
+        DRAFT_BUGGY,
+        MEDIAN_SPEC,
+        MEDIAN_TESTS,
+        Critic,
+        LLMMaker,
+        run_maker_checker,
+    )
+
+    client = LLMClient()
+    watchdog = LoopWatchdog()
+
+    def observe(round_no: int, draft: str, critique) -> None:
+        score = (
+            critique.tests_passed / critique.tests_run
+            if critique.tests_run else None
+        )
+        verdict = watchdog.observe(AttemptObservation(
+            attempt=round_no, output=draft, score=score))
+        print(f"  Round {round_no}: test pass rate {score:.2f} — "
+              f"watchdog says {verdict.kind.value.upper()}")
+        for reason in verdict.reasons:
+            print(f"    - {reason}")
+
+    report = run_maker_checker(
+        MEDIAN_SPEC, LLMMaker(client), Critic(MEDIAN_SPEC, MEDIAN_TESTS),
+        max_rounds=3, first_draft=DRAFT_BUGGY, on_round=observe,
+    )
+    print(f"  Critic loop outcome: "
+          f"{'PASS' if report.succeeded else 'FAILED CLOSED'} "
+          f"in {report.rounds_used} round(s).")
+    print(watchdog.summary())
+    print(
+        f"  Model usage for this demo: {client.total_prompt_tokens} prompt "
+        f"tokens, {client.total_completion_tokens} completion tokens"
+        + (f", ${client.total_cost_usd:.4f}" if client.total_cost_usd else "")
+    )
+    print()
+
+
 if __name__ == "__main__":
     _run_demo(
         "Demo (a): a converging loop — the watchdog lets it finish",
@@ -488,3 +556,4 @@ if __name__ == "__main__":
             for i, (actor, text) in enumerate(PING_PONG)
         ],
     )
+    _run_demo_d_live()

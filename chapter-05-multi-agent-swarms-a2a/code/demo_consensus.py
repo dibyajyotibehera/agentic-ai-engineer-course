@@ -12,6 +12,7 @@ by re-fetching the source of truth, never by ballot. See Exercise 3.
 
 from swarm import (
     Vote,
+    load_accounts,
     resolve_fact_disagreement,
     resolve_majority,
     resolve_weighted,
@@ -61,9 +62,11 @@ def main() -> None:
            resolve_weighted(votes, weights))
 
     # Case 4: a factual disagreement — two renewal dates. No vote is taken;
-    # the source of truth is re-fetched and decides.
+    # the source of truth is re-fetched and decides. The re-fetch reads
+    # the real accounts file on disk, so it is a genuine second read of
+    # the source, not a hard-coded answer.
     def refetch() -> dict:
-        return {"renewal_date": "2026-03-14"}  # the account database
+        return load_accounts()["cust-001"]
 
     report(
         "Case 4 — factual disagreement over renewal_date "

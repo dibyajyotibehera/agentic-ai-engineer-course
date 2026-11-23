@@ -1,23 +1,33 @@
 """End-to-end demo: pause, approve, resume, verify — in one process.
 
-Runs the whole chapter flow without a network connection, a Slack
-app, or a model API key, so it can be checked in seconds::
+Runs the whole chapter flow against a real model::
 
-    python demo_end_to_end.py
+    LLM_BACKEND=opencheap-connector python demo_end_to_end.py
+
+(or set ``LLM_API_KEY`` instead — see ``llm_client.py``). Without a
+configured backend it fails loudly with the setup steps, because
+the plan step is a real model call now and there is no template to
+fall back to.
 
 What it does, in order:
 
-1. Starts an agent run that pauses before its write tool.
+1. Starts an agent run whose plan step asks the model to draft the
+   proposed write, then pauses before its write tool.
 2. Builds the Slack Block Kit card and the Teams Adaptive Card for
    the pending approval and prints both, so the gate payloads can
    be inspected without any chat account.
-3. Simulates the human clicking "Approve" in Slack and routes the
-   resulting decision through the same ``record_decision`` path the
-   webhook endpoint uses.
-4. Resumes the run in a *fresh* store connection — the stand-in for
-   a process restart — and executes the write exactly once.
+3. Routes a real-shaped Slack ``block_actions`` payload — the exact
+   JSON a human clicking "Approve" would produce — through the
+   same ``record_decision`` path the webhook endpoint uses. The
+   human is external to this demo, so the click is supplied as a
+   fixture; what is real is everything after it: signature-shaped
+   payload parsing, decision recording, and the audit trail.
+4. Resumes the run in a *fresh* store connection — a real close and
+   reopen of the SQLite database, the same thing a process restart
+   does — and executes the write exactly once.
 5. Reconstructs the run from the audit log alone and verifies the
-   hash chain, then prints the whole story.
+   hash chain, then prints the whole story, including the model
+   tokens and cost for the run.
 
 Every step asserts its own postcondition, so a silent failure is
 impossible: if any step does not do what the chapter promises, the
@@ -27,6 +37,8 @@ demo exits non-zero with the failed assertion.
 from __future__ import annotations
 
 import json
+import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -35,21 +47,38 @@ import durable_pause
 import slack_gate
 import store
 import teams_gate
+from llm_client import LLMClient, LLMError
 
 
 def main() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == "--backend":
+        os.environ["LLM_BACKEND"] = sys.argv[2]
+    try:
+        client = LLMClient()
+    except LLMError as error:
+        print(f"Cannot run the demo: {error}", file=sys.stderr)
+        print("Set LLM_API_KEY (and optionally LLM_BASE_URL and LLM_MODEL), "
+              "or run with LLM_BACKEND=opencheap-connector "
+              "(or --backend opencheap-connector).", file=sys.stderr)
+        return 2
+
     with tempfile.TemporaryDirectory() as tmp:
         db_path = Path(tmp) / "demo.db"
         conn = store.connect(db_path)
 
-        # 1. The agent plans, then pauses durably before the write.
+        # 1. The agent plans with the real model, then pauses durably
+        # before the write.
         result = durable_pause.run_agent(
             conn, "Publish the weekly changelog",
             approver="approver@example.com", timeout_seconds=900,
+            client=client,
         )
         run_id = result["run_id"]
         assert result["status"] == "awaiting_approval"
+        write = result["approval"]
         print(f"1. Run {run_id} paused before its write tool.")
+        print(f"   Model drafted {write['path']}:")
+        print("   " + write["content_preview"].replace("\n", "\n   "))
 
         # The pause survives a restart: close and reopen the store,
         # as a fresh process would, and confirm the run is still there.
@@ -68,6 +97,8 @@ def main() -> int:
         print("   (no Slack or Teams account needed — JSON only).")
 
         # 3. The human clicks Approve in Slack; route the decision in.
+        # The payload is the exact JSON Slack would send for that
+        # click, fed through the real interaction handler.
         payload = {
             "type": "block_actions",
             "user": {"id": "U123456", "username": "approver"},
@@ -108,6 +139,11 @@ def main() -> int:
         print("5. Audit trail verified and reconstructed from the log alone:")
         print(json.dumps(story, indent=2))
         conn.close()
+    print(
+        f"\nModel usage for this run: {client.total_prompt_tokens} prompt "
+        f"tokens, {client.total_completion_tokens} completion tokens"
+        + (f", ${client.total_cost_usd:.4f}" if client.total_cost_usd else "")
+    )
     print("\nDemo passed: pause, approve, resume, and audit all held.")
     return 0
 

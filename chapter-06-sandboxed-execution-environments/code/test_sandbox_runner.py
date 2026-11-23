@@ -8,17 +8,25 @@ this environment may not have it.
 Note what is deliberately NOT asserted here: the local path does not
 isolate the filesystem or the network, so no test claims it does. The
 tests assert resource limits and timeouts — the only guarantees the
-local path actually provides.
+local path actually provides. The E2B example is tested only for its
+loud refusal without a key (and without the SDK): the live E2B run
+is Exercise 6 and needs a real E2B API key.
 """
 
 from __future__ import annotations
 
+import contextlib
 import http.server
+import importlib.util
+import io
+import os
 import socket
 import threading
 import unittest
 import urllib.request
+from unittest import mock
 
+import e2b_example
 import egress_proxy
 import sandbox_runner
 import untrusted_samples
@@ -139,6 +147,31 @@ class TestEgressProxy(unittest.TestCase):
         # Denied before any outbound connection is attempted, so this
         # needs no external network to pass.
         self.assertEqual(self._fetch_via_proxy("http://example.com/"), 403)
+
+
+class TestE2BExample(unittest.TestCase):
+    """The E2B example fails loudly without a key instead of faking a
+    cloud sandbox locally — these tests pin that behaviour. The live
+    E2B run itself is Exercise 6 and needs a real E2B API key, so it
+    is not covered here; what is covered is the refusal, which is the
+    deliberate stand-in for a managed sandbox this environment cannot
+    provide."""
+
+    def test_no_key_returns_2_and_explains(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("E2B_API_KEY", None)
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(e2b_example.main(), 2)
+        self.assertIn("E2B_API_KEY is not set", err.getvalue())
+        self.assertIn("e2b.dev", err.getvalue())
+
+    @unittest.skipUnless(importlib.util.find_spec("e2b") is None,
+                         "e2b SDK is installed, so this path is live")
+    def test_key_but_no_sdk_returns_2_and_explains(self):
+        with mock.patch.dict(os.environ, {"E2B_API_KEY": "e2b_test_key"}):
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(e2b_example.main(), 2)
+        self.assertIn("not installed", err.getvalue())
 
 
 if __name__ == "__main__":

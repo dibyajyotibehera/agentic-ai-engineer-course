@@ -54,5 +54,18 @@ python raw_mcp_server.py
 
 Server log lines go to standard error; standard output is the wire, so
 keep them separate.
+
+## One deliberate stand-in
+
+The scoped server takes the caller's role from a `--role` command-line
+flag, and that flag stands in for the transport authentication a
+production server uses — an OAuth 2.1 token on a remote server, or a
+mutually-authenticated TLS certificate — because a caller's identity must
+never come from inside the JSON-RPC body, where a caller could simply
+claim a wider scope. In production the process runs as a service account
+with a fixed identity supplied by the transport, and the server maps that
+authenticated identity to scopes before any tool is listed or called; the
+flag is this chapter's stand-in for that arrangement, and the chapter
+README explains what replaces it.
 ```
 

@@ -17,8 +17,13 @@ Thresholds here are *chosen defaults for the exercise* (5 failures,
 30 second reset timeout), not measured results.  In production,
 derive them from your own traffic and latency budget.
 
-No API key or paid service is needed: the demo drives the breaker
-with a mock provider and a fake clock, so no real waiting happens.
+No API key is needed for the deterministic demo: it drives the breaker
+with a scripted failing provider and a fake clock, so no real waiting
+happens. The live check at the end of this file (``live_demo``) instead
+passes one real model call through the breaker, and needs a configured
+model backend (``LLM_BACKEND=opencheap-connector`` on the author's
+machine, or ``LLM_API_KEY``); it is skipped with a note when no backend
+is configured.
 Run:  python circuit_breaker.py
 """
 
@@ -164,11 +169,16 @@ class CircuitBreaker:
 
 
 class FlakyProvider:
-    """A mock provider that fails a fixed number of times, then recovers.
+    """A scripted provider that fails a fixed number of times, then recovers.
 
-    ``failures`` is a list of ProviderError instances to raise in order;
-    once exhausted, calls succeed.  ``calls`` counts every invocation,
-    which is how the demo proves the breaker stops calling it.
+    This is deliberate failure injection, not a model stand-in left
+    unfinished: the breaker logic is what is being studied, and it
+    must trip on a known, repeatable failure sequence, which no real
+    provider can supply on demand. The real-model check lives in
+    ``live_demo`` below. ``failures`` is a list of ProviderError
+    instances to raise in order; once exhausted, calls succeed.
+    ``calls`` counts every invocation, which is how the demo proves
+    the breaker stops calling it.
     """
 
     def __init__(self, failures: list[ProviderError]) -> None:
@@ -180,6 +190,34 @@ class FlakyProvider:
         if self._failures:
             raise self._failures.pop(0)
         return f"answer to: {prompt}"
+
+
+def live_demo() -> None:
+    """Pass one real model call through a closed breaker.
+
+    This is the proof that the breaker above is not only correct
+    against the scripted provider: a healthy real dependency passes
+    through untouched, the breaker stays closed, and the call's real
+    token counts are reported. One short call on the cheap route.
+    """
+    from llm_client import LLMClient
+
+    client = LLMClient()
+    breaker = CircuitBreaker(failure_threshold=5, reset_timeout_s=30.0)
+    before_in = client.total_prompt_tokens
+    before_out = client.total_completion_tokens
+    answer = breaker.call(
+        lambda prompt: client.complete(
+            [{"role": "user", "content": prompt}],
+            model=client.judge_model, max_tokens=1500,
+        ),
+        "Reply with exactly the words: breaker check ok",
+    )
+    print(f"live: real call through the breaker -> {answer.strip()!r}")
+    print(f"live: breaker state={breaker.state.value}, "
+          f"prompt tokens={client.total_prompt_tokens - before_in}, "
+          f"completion tokens={client.total_completion_tokens - before_out}, "
+          f"reported cost=${client.total_cost_usd:.4f}")
 
 
 def demo() -> None:
@@ -222,3 +260,14 @@ def demo() -> None:
 
 if __name__ == "__main__":
     demo()
+    print("\n--- live check: real model call through the breaker ---")
+    try:
+        from llm_client import LLMClient
+
+        if LLMClient.has_backend():
+            live_demo()
+        else:
+            print("live check skipped: no model backend configured "
+                  "(set LLM_API_KEY, or LLM_BACKEND=opencheap-connector)")
+    except Exception as exc:  # noqa: BLE001 - the live check must not hide the demo
+        print(f"live check failed: {exc}")

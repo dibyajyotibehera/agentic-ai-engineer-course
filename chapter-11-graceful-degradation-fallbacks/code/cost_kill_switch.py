@@ -12,8 +12,17 @@ here (per-run 100, per-user 500, global 2,000) are chosen defaults
 for the exercise.  In production, derive the per-run budget from
 your measured cost per task.
 
-No API key or paid service is needed: the model is a mock that
-returns a fixed token count per call.
+No API key is needed for the deterministic demo: the meter and the
+budget are driven by a model that returns a fixed token count per
+call, which is deliberate -- a kill-switch must be testable without
+spending real money, so the meter and budget are separable from the
+provider by design, and the fixed-count model is the injectable
+stand-in the lesson prescribes for that test. The live check at the
+end of this file (``live_demo``) instead drives the same meter with
+real token counts from real model calls, and needs a configured
+model backend (``LLM_BACKEND=opencheap-connector`` on the author's
+machine, or ``LLM_API_KEY``); it is skipped with a note when no
+backend is configured.
 Run:  python cost_kill_switch.py
 """
 
@@ -93,7 +102,13 @@ class Budgets:
 
 
 class MockModel:
-    """Returns a fixed token count per call, so spend is predictable."""
+    """Returns a fixed token count per call, so spend is predictable.
+
+    Deliberate: the kill-switch test needs a model whose spend is
+    known in advance, so the loop can be driven to its hard stop
+    without spending real money. The same loop driven by real token
+    counts lives in ``LiveModel`` below.
+    """
 
     def __init__(self, input_tokens: int = 500, output_tokens: int = 500) -> None:
         self.input_tokens = input_tokens
@@ -103,6 +118,40 @@ class MockModel:
     def complete(self, prompt: str) -> tuple[str, int, int]:
         self.calls += 1
         return f"step result for: {prompt}", self.input_tokens, self.output_tokens
+
+
+class LiveModel:
+    """A real model behind the same ``complete`` interface as ``MockModel``.
+
+    Each call is a real call on the cheap (``:floor``) route, and the
+    token counts returned are the provider-reported counts for that
+    call, read off the client's usage totals -- so the meter records
+    real spend, and the kill-switch trips on real money, not on a
+    scripted count. ``input_tokens`` is only a rough pre-flight
+    estimate (a few hundred tokens for a short step); the post-call
+    record always uses the real counts. ``max_tokens`` is generous
+    (1500) because this model spends a large share of a small budget
+    on hidden reasoning and can return empty content if the budget
+    is too tight.
+    """
+
+    def __init__(self, client, input_tokens: int = 300) -> None:
+        self.client = client
+        self.input_tokens = input_tokens
+        self.output_tokens = 1500
+        self.calls = 0
+
+    def complete(self, prompt: str) -> tuple[str, int, int]:
+        self.calls += 1
+        before_in = self.client.total_prompt_tokens
+        before_out = self.client.total_completion_tokens
+        answer = self.client.complete(
+            [{"role": "user", "content": prompt}],
+            model=self.client.judge_model, max_tokens=1500,
+        )
+        in_tokens = self.client.total_prompt_tokens - before_in
+        out_tokens = self.client.total_completion_tokens - before_out
+        return answer, in_tokens, out_tokens
 
 
 @dataclass
@@ -116,7 +165,7 @@ class MeteredLoop:
     stop was about cost, not about the user's request.
     """
 
-    model: MockModel
+    model: MockModel | LiveModel
     budgets: Budgets
     max_output_tokens: int = 500
     meter: CostMeter = field(default_factory=CostMeter)
@@ -172,6 +221,31 @@ class MeteredLoop:
         }
 
 
+def live_demo() -> None:
+    """Drive the same metered loop with real token counts: two short steps.
+
+    The meter records what the provider actually reported for each
+    call, and the provider-reported dollar cost is printed alongside
+    the abstract-unit tally, so the two accountings can be compared.
+    Two live calls on the cheap route.
+    """
+    from llm_client import LLMClient
+
+    client = LLMClient()
+    loop = MeteredLoop(model=LiveModel(client), budgets=Budgets(per_run=100.0))
+    report = loop.run([
+        "Summarise in one sentence: the refund policy is 30 days.",
+        "Extract the order number from: order 4821 shipped Tuesday.",
+    ])
+    for line in loop.log:
+        print(line)
+    print(f"live: halted={report['halted']}, model_calls={report['model_calls']}, "
+          f"spent={report['spent']} abstract units, "
+          f"real cost=${client.total_cost_usd:.4f}, "
+          f"real tokens={client.total_prompt_tokens} prompt + "
+          f"{client.total_completion_tokens} completion")
+
+
 def demo() -> None:
     # Each call costs 0.5 * 1.0 + 0.5 * 4.0 = 2.5 units; a 100-unit
     # budget allows 40 calls, so a 60-step task must halt mid-run.
@@ -196,3 +270,14 @@ def demo() -> None:
 
 if __name__ == "__main__":
     demo()
+    print("\n--- live check: the same meter driven by real token counts ---")
+    try:
+        from llm_client import LLMClient
+
+        if LLMClient.has_backend():
+            live_demo()
+        else:
+            print("live check skipped: no model backend configured "
+                  "(set LLM_API_KEY, or LLM_BACKEND=opencheap-connector)")
+    except Exception as exc:  # noqa: BLE001 - the live check must not hide the demo
+        print(f"live check failed: {exc}")

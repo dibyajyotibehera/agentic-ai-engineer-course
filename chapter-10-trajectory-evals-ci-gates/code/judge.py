@@ -41,9 +41,14 @@ the study itself.
 
 from __future__ import annotations
 
-import json
-import os
-import urllib.request
+from llm_client import LLMClient
+
+# The judge grades on the cheap route of the same model: a verdict is
+# a short classification, not a reasoning task. The budget is kept
+# generous anyway, because this model spends a large share of its
+# token budget on hidden reasoning and a small budget can come back
+# empty — the verdict itself is only a few dozen tokens.
+_JUDGE_MAX_TOKENS = 2000
 
 
 class MockJudge:
@@ -55,6 +60,16 @@ class MockJudge:
     to develop the grading pipeline and the continuous-integration
     gate without spending anything; swap in :class:`LLMJudge` when
     you need judgement rather than pattern matching.
+
+    This stand-in is deliberate and it stays. The chapter measures
+    judges — :func:`measure_agreement` scores a judge against human
+    labels — and that measurement needs a judge whose verdicts are
+    fixed and repeatable, so the agreement arithmetic can be read
+    and tested without a model call whose verdict might change
+    between runs. A real model judge is the thing being measured
+    here, not the thing doing the measuring; the fixed judge is the
+    instrument, and an instrument that wobbles cannot calibrate
+    anything. The real judge lives next to it in :class:`LLMJudge`.
     """
 
     def grade(self, trajectory_text: str, rubric: str) -> dict:
@@ -75,14 +90,40 @@ class MockJudge:
         }
 
 
-class LLMJudge:
-    """A judge that calls a hosted model through an OpenAI-compatible API.
+def trajectory_to_text(trajectory) -> str:
+    """Render a trajectory as the plain text a judge reads.
 
-    This is a real implementation, written against the standard
-    library only, and it needs an API key to do anything: set
-    ``JUDGE_API_KEY`` and, if your provider is not OpenAI, set
-    ``JUDGE_BASE_URL`` to its chat-completions endpoint. Without a
-    key it raises a clear error instead of silently grading nothing.
+    One line per step — the tool called and what came back — plus the
+    final outcome, so the judge sees the run in the order it happened
+    rather than a summary of it.
+    """
+    lines = [f"Input: {trajectory.input}"]
+    for step in trajectory.steps:
+        if step.kind == "tool_call":
+            lines.append(
+                f"- called {step.tool} with {step.args}, "
+                f"result: {step.result}"
+            )
+        elif step.text:
+            lines.append(f"- {step.kind}: {step.text}")
+        else:
+            lines.append(f"- {step.kind}")
+    lines.append(f"Final outcome: {trajectory.final_outcome}")
+    return "\n".join(lines)
+
+
+class LLMJudge:
+    """A judge that grades through a real model via :class:`LLMClient`.
+
+    It uses the shared client from ``llm_client.py`` — the same client
+    Chapter 7's guardrails use — so it reads its configuration from
+    the environment (``LLM_API_KEY`` / ``LLM_BASE_URL`` / ``LLM_MODEL``,
+    or ``LLM_BACKEND=opencheap-connector`` on a machine where the
+    OpenCheap connector is registered) and raises a clear error when
+    no backend is configured instead of silently grading nothing.
+    The judge grades on the cheap ``:floor`` route, temperature zero,
+    and returns a JSON verdict with a label, a score and a rationale.
+
     The judge model should be pinned by exact model id, and it should
     not be the same model that produced the trajectories being graded,
     or self-preference bias will inflate the scores.
@@ -93,52 +134,37 @@ class LLMJudge:
     judge for pairwise comparisons.
     """
 
-    def __init__(
-        self,
-        model: str = "gpt-5-mini",
-        base_url: str | None = None,
-        api_key: str | None = None,
-    ):
-        self.model = model
-        self.base_url = base_url or os.environ.get(
-            "JUDGE_BASE_URL", "https://api.openai.com/v1"
-        )
-        self.api_key = api_key or os.environ.get("JUDGE_API_KEY")
-        if not self.api_key:
-            raise RuntimeError(
-                "LLMJudge needs an API key: set the JUDGE_API_KEY "
-                "environment variable, or use MockJudge for offline work."
-            )
+    def __init__(self, client: LLMClient | None = None):
+        self.client = client or LLMClient()
 
     def grade(self, trajectory_text: str, rubric: str) -> dict:
         """Grade one trajectory against a rubric, temperature zero."""
-        prompt = (
-            "You are a strict evaluator. Grade the agent trajectory below "
-            "against the rubric. Reply with JSON only, in exactly this shape: "
-            '{"label": "pass" or "fail", "score": a number from 0 to 1, '
-            '"rationale": "one sentence"}.\n\n'
-            f"RUBRIC:\n{rubric}\n\nTRAJECTORY:\n{trajectory_text}"
-        )
-        body = json.dumps(
+        messages = [
             {
-                "model": self.model,
-                "temperature": 0,
-                "messages": [{"role": "user", "content": prompt}],
-            }
-        ).encode("utf-8")
-        request = urllib.request.Request(
-            f"{self.base_url}/chat/completions",
-            data=body,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
+                "role": "system",
+                "content": (
+                    "You are a strict evaluator. Grade the agent "
+                    "trajectory below against the rubric. Reply with "
+                    "JSON only, in exactly this shape: "
+                    '{"label": "pass" or "fail", "score": a number '
+                    'from 0 to 1, "rationale": "one sentence"}.'
+                ),
             },
-            method="POST",
+            {
+                "role": "user",
+                "content": (
+                    f"RUBRIC:\n{rubric}\n\n"
+                    f"TRAJECTORY:\n{trajectory_text}"
+                ),
+            },
+        ]
+        verdict = self.client.structured(
+            messages,
+            model=self.client.judge_model,
+            temperature=0.0,
+            max_tokens=_JUDGE_MAX_TOKENS,
+            required_fields=("label", "score", "rationale"),
         )
-        with urllib.request.urlopen(request, timeout=60) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        content = payload["choices"][0]["message"]["content"]
-        verdict = json.loads(content)
         verdict.setdefault("score", 1.0 if verdict.get("label") == "pass" else 0.0)
         return verdict
 

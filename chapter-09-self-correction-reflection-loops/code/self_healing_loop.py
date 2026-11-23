@@ -14,19 +14,35 @@ When any rule fires, the loop fails *closed*: it returns a diagnosis report
 containing every attempt, every failure signature and a suggested next step,
 instead of looping forever or silently returning a wrong answer.
 
-The generator here is a scripted stand-in with a fixed list of candidate
-programs, so the module runs with no model and no API key. To plug in a real
-language model, replace ``ScriptedGenerator`` with a callable that takes the
-task and the attempt history and returns code — the loop itself does not
-change. See the ``TODO`` in ``ScriptedGenerator``.
+The generator is a real language-model call (``LLMGenerator``, through
+``llm_client.LLMClient``, the same client Chapter 7 uses). Its prompt is
+built from the task, the last diagnosis (exception type, deepest user
+frame, suggested fix) and the list of failure signatures already seen,
+and it is instructed never to repeat a failed program verbatim and to
+change only what the diagnosis names. The executor, the traceback
+parser, the failure classifier and the stopping rules are all
+deterministic and local — the model is only ever the generator, never
+the judge of its own work. That division is what keeps the loop honest:
+execution and verification are the external signals, and the model
+supplies only the next attempt.
+
+Running the demo needs a configured model backend — ``LLM_API_KEY``
+(or ``LLM_BACKEND=opencheap-connector`` on the author's machine, as
+in Chapter 7). Without one it fails loudly instead of pretending
+with a scripted generator. The deterministic behaviour of the loop
+itself — budgets, stopping rules, fail-closed reports — is covered by
+the tests in ``test_critic_and_healing.py``, which drive the loop with
+a small scripted generator defined in that file, so the tests need no
+model and no key.
 
 Safety note: the executor runs code in-process with ``exec`` for the sake of
 a runnable demo. Production code must run agent-generated code in a sandbox
 (Chapter 6 of this course) with resource limits and no network egress.
 Never point this executor at untrusted code.
 
-Run the module directly to see both endings — a repair that succeeds, and a
-repair that fails closed:
+Run the module directly to see three endings — a repair that succeeds, a
+repair that fails closed on a repeated signature, and a failure that is
+unrepairable on the first attempt:
 
     python self_healing_loop.py
 """
@@ -36,11 +52,50 @@ from __future__ import annotations
 import ast
 import contextlib
 import io
+import re
+import sys
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Optional, Protocol
 
+from llm_client import LLMClient, LLMError
 from traceback_parser import TracebackDiagnosis, diagnose_exception, parse_traceback
+
+# Generous enough for a short program: this model spends part of its
+# token budget on hidden reasoning, and a small budget can be spent
+# entirely on reasoning, leaving an empty reply (see Chapter 7).
+_GENERATOR_MAX_TOKENS = 800
+
+_GENERATOR_SYSTEM = """You are a Python programmer. Reply with exactly one fenced python code block \
+containing the complete program and nothing else — no explanation, no extra code."""
+
+_GENERATOR_PROMPT = """Write a Python program for this task:
+
+{task}
+
+{context}
+The program must print its result to standard output.
+"""
+
+_CODE_BLOCK_RE = re.compile(r"```(?:python)?\s*\n(.*?)\n?```", re.DOTALL)
+
+
+def _extract_code(reply: str) -> str:
+    """Return the Python code from a model reply.
+
+    Prefers the first fenced code block; falls back to the whole reply
+    when it already looks like code. Raises instead of returning a
+    plausible-looking fragment, because a half-extracted program would
+    fail execution for the wrong reason and teach the loop nothing.
+    """
+    match = _CODE_BLOCK_RE.search(reply)
+    if match:
+        return match.group(1).strip() + "\n"
+    stripped = reply.strip()
+    if stripped.startswith(("def ", "import ", "from ", "print(")):
+        return stripped + "\n"
+    raise LLMError(f"Model reply contained no Python code block: {reply[:300]}")
 
 
 class FailureKind(Enum):
@@ -133,26 +188,78 @@ class HealingReport:
         return "\n".join(lines)
 
 
-class ScriptedGenerator:
-    """A stand-in for a language-model code generator.
+class Generator(Protocol):
+    """What the loop needs from a generator, model or otherwise."""
 
-    It returns a fixed sequence of candidate programs, one per attempt, so
-    the loop's behaviour is deterministic and testable without a model.
+    def generate(self, task: str, history: list[AttemptRecord]) -> str: ...
 
-    TODO: replace with a real generator. The interface is
-    ``generate(task, history) -> str``, where ``history`` is the list of
-    ``AttemptRecord`` objects so far. A real implementation should build its
-    prompt from the task, the last diagnosis (exception type, deepest user
-    frame, suggested fix) and the list of failure signatures already seen,
-    and it should be instructed never to repeat a failed program verbatim.
+
+class LLMGenerator:
+    """A real language-model code generator.
+
+    The prompt carries the diagnosis, not the raw trace — the
+    exception type, the deepest user frame, the suggested fix — plus
+    the failure signatures already seen, so the model can be told
+    explicitly never to repeat a program that has already failed.
+    Only the last two attempts are carried forward, following
+    Reflexion's cap on episodic memory: context is finite, and a
+    loop that appends every failure to the prompt drowns in its own
+    history.
     """
 
-    def __init__(self, candidates: list[str]):
-        self.candidates = candidates
+    def __init__(self, client: LLMClient, first_code: str | None = None) -> None:
+        self.client = client
+        # ``first_code`` starts the loop from an existing program — a
+        # human's first attempt, or a draft from an earlier run —
+        # instead of asking the model for one. The demo uses it to
+        # start from a known-buggy program, so the repair path is
+        # exercised on every run instead of depending on the model
+        # making the same mistake first. The repair itself is still a
+        # real model call.
+        self._first_code = first_code
 
     def generate(self, task: str, history: list[AttemptRecord]) -> str:
-        index = min(len(history), len(self.candidates) - 1)
-        return self.candidates[index]
+        if not history and self._first_code is not None:
+            return self._first_code
+        context = self._context_for(history)
+        reply = self.client.complete(
+            [
+                {"role": "system", "content": _GENERATOR_SYSTEM},
+                {"role": "user", "content": _GENERATOR_PROMPT.format(
+                    task=task, context=context)},
+            ],
+            temperature=0.0,
+            max_tokens=_GENERATOR_MAX_TOKENS,
+        )
+        return _extract_code(reply)
+
+    @staticmethod
+    def _context_for(history: list[AttemptRecord]) -> str:
+        if not history:
+            return "This is the first attempt."
+        lines = ["Previous attempts (most recent last):"]
+        for record in history[-2:]:
+            lines.append(f"Attempt {record.attempt} ({record.outcome}):")
+            lines.append("```python")
+            lines.append(record.code.rstrip())
+            lines.append("```")
+            if record.diagnosis is not None:
+                lines.append("Diagnosis:")
+                lines.append(record.diagnosis.summary())
+        signatures = sorted(
+            {str(record.diagnosis.signature)
+             for record in history if record.diagnosis is not None}
+        )
+        if signatures:
+            lines.append(
+                "Failure signatures already seen — do not produce a program "
+                f"that fails the same way: {', '.join(signatures)}"
+            )
+        lines.append(
+            "Change only what the diagnosis names. Do not repeat a failed "
+            "program verbatim."
+        )
+        return "\n".join(lines)
 
 
 def _execute(code: str) -> tuple[str, str | None, TracebackDiagnosis | None]:
@@ -179,7 +286,7 @@ def _execute(code: str) -> tuple[str, str | None, TracebackDiagnosis | None]:
 
 def run_self_healing(
     task: str,
-    generator: ScriptedGenerator,
+    generator: Generator,
     verifier,
     budget: RetryBudget | None = None,
     sleep=time.sleep,
@@ -270,27 +377,6 @@ def median(xs):
 print(median([3, 1, 2, 4]))
 '''
 
-FIXED_MEDIAN = '''
-def median(xs):
-    if not xs:
-        raise ValueError("median of an empty list is undefined")
-    xs = sorted(xs)
-    n = len(xs)
-    mid = n // 2
-    if n % 2 == 1:
-        return xs[mid]
-    return (xs[mid - 1] + xs[mid]) / 2
-
-print(median([3, 1, 2, 4]))
-'''
-
-STILL_BUGGY = '''
-def lookup(users, user_id):
-    return users[user_id]["name"]
-
-print(lookup({"u1": {"name": "Asha"}}, "u2"))
-'''
-
 
 def _median_verifier(output: str) -> tuple[bool, str]:
     # median([1, 2, 3, 4]) is 2.5; the buggy version prints 3.
@@ -299,29 +385,68 @@ def _median_verifier(output: str) -> tuple[bool, str]:
     return False, f"expected '2.5', got {output.strip()!r}"
 
 
-def _never_passes(_output: str) -> tuple[bool, str]:
-    return False, "no output can satisfy this verifier"
+def _timestamp_verifier(output: str) -> tuple[bool, str]:
+    # The task asks for the current UTC time; the verifier accepts only
+    # one fixed timestamp. No program that follows the task can ever
+    # print it, so the verifier rejects every attempt and the loop
+    # stops early on the repeated failure signature. The reason
+    # deliberately does not name the expected value: naming it would
+    # hand the model a literal to print, which would "pass" without
+    # doing the task.
+    if output.strip() == "2026-11-22T00:00:00+00:00":
+        return True, ""
+    return False, "output did not match the required timestamp"
 
 
-if __name__ == "__main__":
+def main() -> int:
+    try:
+        client = LLMClient()
+    except LLMError as error:
+        print(f"Cannot run the demo: {error}", file=sys.stderr)
+        print("Set LLM_API_KEY (and optionally LLM_BASE_URL and LLM_MODEL), "
+              "or run with LLM_BACKEND=opencheap-connector.", file=sys.stderr)
+        return 2
+
     print("=== Demo 1: the loop heals itself ===")
     report = run_self_healing(
         task="Write a median function and print median([3, 1, 2, 4]).",
-        generator=ScriptedGenerator([BUGGY_MEDIAN, FIXED_MEDIAN]),
+        generator=LLMGenerator(client, first_code=BUGGY_MEDIAN),
         verifier=_median_verifier,
         budget=RetryBudget(max_attempts=3, base_delay_s=0.0),
         sleep=lambda _s: None,
     )
     print(report)
 
-    print("\n=== Demo 2: the same KeyError twice — stop early, fail closed ===")
+    print("\n=== Demo 2: the verifier never accepts — stop on a repeated signature ===")
     report = run_self_healing(
-        task="Look up a user that does not exist.",
-        generator=ScriptedGenerator([STILL_BUGGY, STILL_BUGGY, STILL_BUGGY]),
-        verifier=_never_passes,
+        task="Print the current UTC time as an ISO 8601 timestamp.",
+        generator=LLMGenerator(client),
+        verifier=_timestamp_verifier,
         budget=RetryBudget(max_attempts=3, base_delay_s=0.0),
         sleep=lambda _s: None,
     )
     print(report)
     print("\nDiagnosis of the final failure:")
     print(report.attempts[-1].diagnosis.summary())
+
+    print("\n=== Demo 3: a missing dependency — unrepairable on the first attempt ===")
+    report = run_self_healing(
+        task="Import the qzx_cryptolib module and use its encrypt() "
+             "function on the string 'hello', then print the ciphertext.",
+        generator=LLMGenerator(client),
+        verifier=lambda output: (True, ""),
+        budget=RetryBudget(max_attempts=3, base_delay_s=0.0),
+        sleep=lambda _s: None,
+    )
+    print(report)
+
+    print(
+        f"\nModel usage for this run: {client.total_prompt_tokens} prompt tokens, "
+        f"{client.total_completion_tokens} completion tokens"
+        + (f", ${client.total_cost_usd:.4f}" if client.total_cost_usd else "")
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

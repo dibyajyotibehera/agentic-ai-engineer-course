@@ -28,15 +28,31 @@ not.
 This module implements the formula with a deliberately naive
 stand-in for both pieces — sentence splitting for claim extraction,
 keyword overlap for entailment — so the arithmetic is visible and
-the pipeline runs offline. :class:`HHEMFaithfulness` is the stub
-where the real classifier plugs in.
+the pipeline runs offline. The keyword-overlap check,
+:func:`mock_entails`, stays as the deterministic default because the
+scoring arithmetic has to be readable and testable without a model
+call, and because a continuous-integration gate needs a grader that
+gives the same answer every time. But the claim check is also the
+place where a real model belongs, so :class:`LLMClaimChecker` does
+the same check with a real model call through the shared
+``llm_client.py`` client: pass its ``entails`` method into
+:func:`faithfulness_score` and the same arithmetic runs over real
+judgements instead of keyword overlap. :class:`HHEMFaithfulness`
+remains the stub where the local classifier plugs in.
 """
 
 from __future__ import annotations
 
 import re
 
+from llm_client import LLMClient
+
 _WORD = re.compile(r"[a-z0-9]+")
+
+# Same reasoning as the judge in judge.py: the verdict is short, but
+# this model spends much of its token budget on hidden reasoning, so
+# a small budget can come back empty.
+_CLAIM_MAX_TOKENS = 1500
 
 
 def split_claims(response: str) -> list[str]:
@@ -74,6 +90,58 @@ def mock_entails(claim: str, context: str) -> bool:
     return len(claim_words & context_words) / len(claim_words) >= 0.5
 
 
+class LLMClaimChecker:
+    """Claim checking with a real model, through the shared client.
+
+    This is the claim-check step the way Ragas runs it: a model reads
+    one claim and the retrieved context and decides whether the
+    context supports the claim. It grades on the cheap ``:floor``
+    route at temperature zero, and it returns a boolean, so it plugs
+    straight into :func:`faithfulness_score` and
+    :func:`context_recall_score` as the ``entails`` argument — the
+    same arithmetic, over real judgements instead of keyword overlap.
+
+    A claim check is a narrow yes-or-no question, which is also why
+    the deterministic keyword check stays the default: a gate that
+    runs on every pull request needs the same answer every time, and
+    a model judge does not give that. Use the model check when you
+    are measuring the quality of a run, not when you are gating on it.
+    """
+
+    def __init__(self, client: LLMClient | None = None):
+        self.client = client or LLMClient()
+
+    def entails(self, claim: str, context: str) -> bool:
+        """True when the context supports the claim, judged by a model."""
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You decide whether a piece of retrieved context "
+                    "supports a claim. Reply with JSON only, in exactly "
+                    'this shape: {"supported": true or false, '
+                    '"reason": "one sentence"}. Supported means the '
+                    "context states the claim, or the claim follows "
+                    "directly from what the context states. A claim "
+                    "that adds a fact the context never mentions is "
+                    "not supported, even if it is true in the world."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"CONTEXT:\n{context}\n\nCLAIM:\n{claim}",
+            },
+        ]
+        verdict = self.client.structured(
+            messages,
+            model=self.client.judge_model,
+            temperature=0.0,
+            max_tokens=_CLAIM_MAX_TOKENS,
+            required_fields=("supported", "reason"),
+        )
+        return bool(verdict["supported"])
+
+
 def faithfulness_score(
     response: str, retrieved_contexts: list[str], entails=mock_entails
 ) -> dict:
@@ -96,17 +164,22 @@ def faithfulness_score(
     }
 
 
-def context_recall_score(reference: str, retrieved_contexts: list[str]) -> dict:
+def context_recall_score(
+    reference: str, retrieved_contexts: list[str], entails=mock_entails
+) -> dict:
     """Score retrieval against a reference answer.
 
     Context recall is the fraction of claims in the *reference* that
     the retrieved context supports, so a low score blames retrieval,
     not the generator: the answer could not have been grounded because
-    the evidence was never fetched.
+    the evidence was never fetched. Pass an
+    :class:`LLMClaimChecker`'s ``entails`` method to score with a real
+    model instead of the keyword check, the same way as for
+    :func:`faithfulness_score`.
     """
     context = " ".join(retrieved_contexts)
     claims = split_claims(reference)
-    verdicts = [(claim, mock_entails(claim, context)) for claim in claims]
+    verdicts = [(claim, entails(claim, context)) for claim in claims]
     supported = sum(1 for _, ok in verdicts if ok)
     total = len(verdicts)
     return {
@@ -137,5 +210,7 @@ class HHEMFaithfulness:
             "HHEMFaithfulness is a stub in this chapter: install "
             "`transformers` and `torch`, then load "
             f"{self.MODEL_ID!r} and implement score() to replace "
-            "mock_entails with the classifier. See references.md."
+            "mock_entails with the classifier. See references.md. "
+            "For a claim check that works now, use LLMClaimChecker "
+            "in this file, which grades claims with a real model."
         )

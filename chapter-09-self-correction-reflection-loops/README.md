@@ -89,7 +89,11 @@ needs a decision to act on, not an essay to interpret. In
 `code/critic_agent.py` the critic is a test-suite critic: it executes the
 draft against seven tests for a median function, and on the first draft it
 fails five of them, naming each failure precisely enough that the revision
-passes all seven on the second round. That is the whole pattern in
+passes all seven on the second round. The maker doing the revising is a
+real language-model call, not a scripted stand-in, and a second model
+critic reads the same test evidence and returns a structured verdict with
+a confidence score — a second opinion whose agreement with the test suite
+the demo prints, because the loop acts only on the test suite's verdict. That is the whole pattern in
 miniature, and the measured result is worth noting because it is the
 chapter's baseline: a first draft that passes 2 of 7 tests becomes a draft
 that passes 7 of 7 after one critic-guided revision. The critic did not make
@@ -696,35 +700,53 @@ rest of the design credible.
 
 ## What the code does
 
-The `code/` directory holds four standard-library-only Python modules,
-each runnable with no model and no application programming interface (API) key, because the loop's logic — not
-the model call — is what this chapter teaches. `traceback_parser.py` turns
+The `code/` directory holds five standard-library-only Python modules
+(`llm_client.py`, copied verbatim from Chapter 7 so the chapter is
+self-contained, plus the four below). The loop's logic is what this
+chapter teaches, but the model calls inside it are real: the maker in
+`critic_agent.py` and the generator in `self_healing_loop.py` call a
+language model through `llm_client.py`, so those two demos need a
+configured model backend — set `LLM_API_KEY`, or run with
+`LLM_BACKEND=opencheap-connector` on the author's machine — and fail
+loudly without one instead of pretending with a scripted stand-in.
+`traceback_parser.py` and the first three demos of `loop_watchdog.py`
+need no model and no key. `traceback_parser.py` turns
 a raw traceback into a structured diagnosis with a failure signature;
 `critic_agent.py` runs a maker–checker loop in which a test-suite critic
-catches five failures in a first draft and passes the revision on round
+catches five failures in a first draft and passes the model maker's
+revision on round
 two, `self_healing_loop.py` assembles the full loop with a hard retry
 budget, exponential backoff, repeat-signature detection and a fail-closed
 report; and `loop_watchdog.py` adds the separate observer from the
 runaway-loops section above — state hashing, a token-overlap and
 edit-distance proxy for semantic repetition (labelled as a proxy, not
 a real embedding), evaluator-score progress tracking, and a
-continue / warn / stop verdict with recorded reasons. The generators in the last three modules are scripted stand-ins with
-a fixed list of candidate programs, and the `TODO` comments mark exactly
-where a real model call plugs in — the interface is `generate(task,
-history) -> str` for the healer and `revise(specification, findings) -> str`
-for the maker, and nothing else in the loop changes when you make the swap.
-For the watchdog the swap points are the semantic-similarity function
-(real embeddings in place of the proxy) and the evaluator scores (the
-verifier's or critic's own scores, passed in per attempt). Run each module directly to see its demo, and note the measured results
+continue / warn / stop verdict with recorded reasons. The interfaces the
+loops depend on are `generate(task, history) -> str` for the healer and
+`revise(specification, draft, findings) -> str` for the maker, and the
+scripted makers and generators that used to stand in for the model now
+live only in `test_critic_and_healing.py` as test doubles, so the loops'
+deterministic logic can be tested with no model and no key.
+For the watchdog the remaining swap point is the semantic-similarity function
+(real embeddings in place of the proxy), and its live demo (d) already
+wires the evaluator scores for real — it observes the critic loop from
+`critic_agent.py` and feeds each round's test pass rate in as the score.
+Run each module directly to see its demo, and note the measured results
 rather than taking them on trust: the critic moves a median function from
 2 of 7 tests passing to 7 of 7 in one revision round, the healing loop
 repairs the same function in 2 attempts, and the unfixable case fails
 closed after 2 attempts — stopping early on a repeated signature instead of
-spending its budget of 3. The watchdog's demo shows the same discipline
+spending its budget of 3 — while a missing dependency fails closed on the
+first attempt. The watchdog's demo shows the same discipline
 one level up: a converging loop whose worked-example score climbs from
 0.40 to 0.95 is let through with four continue verdicts, an oscillating
 loop is stopped on its third attempt, and a ping-pong delegation is
-stopped on its fifth attempt after two full delegation cycles. The exercises then ask you to rebuild each piece
+stopped on its fifth attempt after two full delegation cycles, and its
+live demo watches the real critic loop's repair earn continue verdicts
+on both rounds. The whole chapter's live behaviour costs a few tenths
+of a cent per run on the cheap model route (the critic demo $0.0015,
+the healing demo $0.0016, the watchdog's live demo $0.0003 on the runs
+above). The exercises then ask you to rebuild each piece
 yourself, with the model plugged in for real, and to prove the termination
 argument for a loop of your own design.
 

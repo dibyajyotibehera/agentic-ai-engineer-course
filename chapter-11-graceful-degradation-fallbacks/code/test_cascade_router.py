@@ -7,7 +7,11 @@ Standard library only.  Run from the code/ directory:
 
 Every number here is a worked example from the simulated pool in
 cascade_router.py -- illustrative prices and scripted quality scores,
-not real vendor prices or measured results.
+not real vendor prices or measured results. The deterministic tests
+below need no model. The live tests at the end need a configured
+model backend (``LLM_BACKEND=opencheap-connector`` on the author's
+machine, or ``LLM_API_KEY``); like Chapter 7's live tests, they skip
+instead of failing when no backend is configured.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from cascade_router import (  # noqa: E402
     CascadeRouter,
     GoldenTask,
     Task,
+    answer_routed,
     complexity_score,
     default_golden_set,
     default_pool,
@@ -29,6 +34,12 @@ from cascade_router import (  # noqa: E402
     expected_cost,
     replay_matrix,
 )
+from llm_client import LLMClient  # noqa: E402
+from model_cascade import LiveRung, ModelCascade, Rung  # noqa: E402
+
+
+def _llm_available() -> bool:
+    return LLMClient.has_backend()
 
 
 class TestExpectedCost(unittest.TestCase):
@@ -150,6 +161,58 @@ class TestEvalHarness(unittest.TestCase):
         # easy extract task down to small where fixed pays for mid.
         self.assertLessEqual(reports[1].avg_cost_per_task,
                              reports[0].avg_cost_per_task)
+
+
+@unittest.skipUnless(_llm_available(), "needs a configured LLM backend")
+class TestRoutedAnswersLive(unittest.TestCase):
+    """Live tests: the router's decision, answered by the real model.
+
+    Three short calls in total: an easy task on the cheap tier, a
+    hard task on the frontier tier, and a cascade step-down to a
+    live cheap rung after a scripted frontier failure.
+    """
+
+    def test_easy_task_answered_by_the_cheap_tier(self):
+        client = LLMClient()
+        result = answer_routed(
+            Task("Summarise this refund policy in two sentences: refunds "
+                 "are accepted within 30 days of purchase with a receipt.",
+                 "summarise"),
+            client)
+        self.assertEqual(result["routed_model"], "small")
+        self.assertEqual(result["served_tier"], "small")
+        self.assertTrue(result["answer"].strip())
+        self.assertGreater(result["prompt_tokens"], 0)
+        self.assertGreater(result["completion_tokens"], 0)
+
+    def test_hard_task_answered_by_the_frontier_tier(self):
+        client = LLMClient()
+        result = answer_routed(
+            Task("Design a multi-step migration plan with trade-off analysis "
+                 "and edge cases for the billing service, in three short "
+                 "bullet points.", "plan"),
+            client)
+        self.assertEqual(result["routed_model"], "frontier")
+        self.assertEqual(result["served_tier"], "frontier")
+        self.assertTrue(result["answer"].strip())
+        self.assertGreater(result["prompt_tokens"], 0)
+        self.assertGreater(result["completion_tokens"], 0)
+
+    def test_cascade_steps_down_to_a_live_cheap_rung(self):
+        client = LLMClient()
+        cascade = ModelCascade(
+            [
+                Rung("frontier", 10, [503]),
+                LiveRung("cheaper-same-provider", client, client.judge_model),
+            ],
+            cache={},
+        )
+        result = cascade.run(
+            "What is the refund policy? Answer in one sentence.")
+        self.assertEqual(result.served_by, "cheaper-same-provider")
+        self.assertEqual(result.calls_made, 2)
+        self.assertTrue(result.answer.strip())
+        self.assertGreaterEqual(result.total_cost_usd, 0.0)
 
 
 if __name__ == "__main__":

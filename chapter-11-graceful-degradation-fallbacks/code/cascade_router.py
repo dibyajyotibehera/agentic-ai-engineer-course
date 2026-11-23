@@ -18,13 +18,33 @@ before trading cost against quality
 The cheapest model only counts if it clears the quality bar for that
 task type: a saving bought with a wrong answer is not a saving.
 
+The simulated pool is the offline worked example: the routing
+decision, the expected-cost arithmetic, the golden-set eval and the
+shadow log are deterministic logic, and they are studied here
+without spending money. The scripted quality scores are a deliberate
+stand-in for measured pass rates -- they are labelled as such, and
+the live tiers below are what replace the stand-in with a real
+model: ``LiveTier`` calls the model for real, and
+``answer_routed`` routes a task with the same router and then
+answers it on the routed tier, reporting the provider's real token
+counts and real dollar cost. The backend exposes only two routes of
+one model (the full model and its ``:floor`` cheap route), so the
+live pool has two tiers -- small (``:floor``) and frontier (full) --
+and a task the simulated pool would route to mid is served live by
+the cheap tier, which the live demo says plainly when it happens.
+
 Prices below are *illustrative worked-example prices*, not real
 vendor prices -- frontier $15 in / $60 out, mid $3 in / $12 out,
 small $0.50 in / $2 out per 1M tokens.  Replace them with your own
 measured cost per task before using this in production.  Quality
 scores are likewise scripted stand-ins, not measured results.
 
-No API key or paid service is needed: every model is simulated.
+No API key is needed for the deterministic demo: every model in the
+simulated pool is a worked example. The live section at the end of
+the demo answers two routed tasks with the real model, and needs a
+configured model backend (``LLM_BACKEND=opencheap-connector`` on
+the author's machine, or ``LLM_API_KEY``); it is skipped with a
+note when no backend is configured.
 Run:  python cascade_router.py
 Test: python test_cascade_router.py
 """
@@ -357,6 +377,130 @@ def default_golden_set() -> list[GoldenTask]:
     ]
 
 
+# ---------------------------------------------------------------------------
+# Live tiers: the same routing decision, answered by the real model
+# ---------------------------------------------------------------------------
+
+@dataclass
+class LiveTier:
+    """One tier of the live pool: a real model route, not a simulation.
+
+    ``name`` is the tier name in the simulated pool (``"small"`` or
+    ``"frontier"``); ``model_id`` is the route on the configured
+    backend. The cheap tier is the ``:floor`` route of the same
+    model, the frontier tier is the default model. ``complete``
+    returns the model's real answer plus the provider-reported
+    token counts and dollar cost for that call, read off the
+    client's usage totals. ``max_tokens`` is generous (1500) because
+    this model spends a large share of a small budget on hidden
+    reasoning and can return empty content if the budget is too
+    tight.
+    """
+
+    name: str
+    model_id: str
+    calls: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cost_usd: float = 0.0
+
+    def complete(self, client, prompt: str) -> tuple[str, int, int, float]:
+        self.calls += 1
+        before_in = client.total_prompt_tokens
+        before_out = client.total_completion_tokens
+        before_cost = client.total_cost_usd
+        answer = client.complete(
+            [{"role": "user", "content": prompt}],
+            model=self.model_id, max_tokens=1500,
+        )
+        in_tokens = client.total_prompt_tokens - before_in
+        out_tokens = client.total_completion_tokens - before_out
+        cost = client.total_cost_usd - before_cost
+        self.prompt_tokens += in_tokens
+        self.completion_tokens += out_tokens
+        self.cost_usd += cost
+        return answer, in_tokens, out_tokens, cost
+
+
+def live_tiers(client) -> dict[str, LiveTier]:
+    """The live pool: two real tiers, keyed by simulated-pool name."""
+    return {
+        "small": LiveTier("small", client.judge_model),
+        "frontier": LiveTier("frontier", client.model),
+    }
+
+
+# The simulated pool has a mid tier the backend has no route for, so
+# a live answer routed to mid is served by the cheap tier instead.
+# That collapse is the honest mapping on this backend, and it is
+# reported in the result rather than hidden.
+_LIVE_TIER_FOR_ROUTE = {"small": "small", "mid": "small",
+                        "frontier": "frontier"}
+
+
+def answer_routed(task: Task, client, router: CascadeRouter | None = None,
+                  tiers: dict[str, LiveTier] | None = None) -> dict:
+    """Route a task with the deterministic router, then answer it for real.
+
+    The routing decision is the same one the simulated pool makes --
+    complexity score, quality bar, cheapest tier that clears it --
+    and the answer comes from the real model on the routed tier.
+    Returns the decision, the tier that actually served it, the
+    answer text, and the provider-reported tokens and dollars.
+    """
+    router = router or CascadeRouter(mode="predictive")
+    tiers = tiers or live_tiers(client)
+    decision = router.route(task)
+    tier_name = _LIVE_TIER_FOR_ROUTE[decision.model]
+    tier = tiers[tier_name]
+    answer, in_tokens, out_tokens, cost = tier.complete(client, task.prompt)
+    return {
+        "routed_model": decision.model,
+        "served_tier": tier_name,
+        "served_model_id": tier.model_id,
+        "collapsed_mid_to_small": decision.model == "mid",
+        "complexity": round(decision.complexity, 2),
+        "answer": answer,
+        "prompt_tokens": in_tokens,
+        "completion_tokens": out_tokens,
+        "cost_usd": cost,
+    }
+
+
+def live_demo() -> None:
+    """Answer two routed tasks with the real model: one easy, one hard.
+
+    The easy summarisation routes to the cheap tier, the hard
+    planning task routes to the frontier tier, and each answer is
+    real, with real token counts and real dollars. Two live calls.
+    """
+    from llm_client import LLMClient
+
+    client = LLMClient()
+    tiers = live_tiers(client)
+    for task in [
+        Task("Summarise this refund policy in two sentences: refunds "
+             "are accepted within 30 days of purchase with a receipt.",
+             "summarise"),
+        Task("Design a multi-step migration plan with trade-off analysis "
+             "and edge cases for the billing service, in three short "
+             "bullet points.", "plan"),
+    ]:
+        result = answer_routed(task, client, tiers=tiers)
+        note = (" (mid has no live route; served by the cheap tier)"
+                if result["collapsed_mid_to_small"] else "")
+        print(f"live: {task.task_type} task routed to "
+              f"{result['routed_model']} -> served by "
+              f"{result['served_tier']} ({result['served_model_id']}){note}")
+        print(f"live: answer: {result['answer'].strip()[:200]!r}")
+        print(f"live: {result['prompt_tokens']} prompt + "
+              f"{result['completion_tokens']} completion tokens, "
+              f"cost ${result['cost_usd']:.4f}")
+    print(f"live: client totals: {client.total_prompt_tokens} prompt + "
+          f"{client.total_completion_tokens} completion tokens, "
+          f"${client.total_cost_usd:.4f}")
+
+
 def demo() -> None:
     pool = default_pool()
     by_name = {m.name: m for m in pool}
@@ -416,3 +560,14 @@ def demo() -> None:
 
 if __name__ == "__main__":
     demo()
+    print("\n--- live check: routed tasks answered by the real model ---")
+    try:
+        from llm_client import LLMClient
+
+        if LLMClient.has_backend():
+            live_demo()
+        else:
+            print("live check skipped: no model backend configured "
+                  "(set LLM_API_KEY, or LLM_BACKEND=opencheap-connector)")
+    except Exception as exc:  # noqa: BLE001 - the live check must not hide the demo
+        print(f"live check failed: {exc}")

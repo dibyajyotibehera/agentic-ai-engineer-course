@@ -11,8 +11,17 @@ about which tools a caller may use.
 
 The three tools are the same ones the raw server exposes — ``search_docs``,
 ``get_ticket`` and ``update_ticket_status`` — over the same in-memory
-tickets and documentation, so you can compare the two servers call for
-call with ``mcp_client.py`` (point it at this file with ``fastmcp run``).
+tickets and documentation, so the comparison with the raw server is made
+by reading the two files side by side. The comparison stops at the code:
+the chapter's ``mcp_client.py`` speaks the chapter's 2026-07-28 stateless
+revision, with ``server/discover`` and a per-request protocol version in
+``_meta``, while this server speaks the standard handshake protocol that
+real FastMCP implements, so the chapter client cannot drive this file —
+``server/discover`` comes back ``-32601`` and calls sent without an
+``initialize`` handshake are refused with ``-32600`` (verified against
+both ``python fastmcp_equivalent.py`` and ``fastmcp run``). Drive this
+server with a standard MCP client instead: send ``initialize`` first,
+then ``tools/list`` and ``tools/call`` as usual.
 
 Requires FastMCP, which is not in ``requirements.txt`` because it is a
 framework, not a dependency of the chapter's core exercises::

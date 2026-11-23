@@ -1,8 +1,13 @@
 # Chapter 01 — Exercises
 
-Work in `code/` for every exercise. No exercise needs a model API key: the
-"model" throughout is a deterministic mock, so what you are testing is the
-architecture, not a vendor. Where an exercise has a Temporal variant that
+Work in `code/` for every exercise. No exercise needs a model API key:
+the demos run in a deterministic mode by default — drafts are templates
+and the reviewer is a rule — so what you are testing is the
+architecture, not a vendor. Every demo also has a `--live` mode that
+replaces those stand-ins with real model calls (see `code/README.md`);
+the live runs produce the same outcomes, and trying one is a good way
+to see that the architecture does not depend on the reviewer being
+deterministic. Where an exercise has a Temporal variant that
 needs a server, the local simulator in `code/04_temporal_workflow.py` is an
 accepted substitute, and the exercise says so.
 
@@ -10,9 +15,10 @@ accepted substitute, and the exercise says so.
 
 **Difficulty:** Foundation
 
-Run `code/01_dag_vs_cycle.py` and read the output, then change the mock
-reviewer so that ticket T-102 needs *two* redrafts instead of one (it fails
-attempts 1 and 2 and passes on attempt 3), keeping `MAX_ATTEMPTS = 2`.
+Run `code/01_dag_vs_cycle.py` and read the output, then change the
+deterministic reviewer (`review()` in the file) so that ticket T-102 needs
+*two* redrafts instead of one (it fails attempts 1 and 2 and passes on
+attempt 3), keeping `MAX_ATTEMPTS = 2`.
 
 **Acceptance criteria**
 
@@ -58,8 +64,10 @@ python code/02_langgraph_checkpoint_resume.py history --thread ex2
 
 This is the failure mode that matters most in production, so do it
 deliberately. Edit `send_receipt` in `code/02_langgraph_checkpoint_resume.py`
-so it is *not* idempotent: remove the duplicate check so every execution
-appends a receipt unconditionally. Then simulate a kill *inside* the node:
+so it is *not* idempotent: bypass the ledger's duplicate check — for
+example by appending a receipt line to `receipts.jsonl` directly instead
+of calling `record_receipt()` — so every execution appends a receipt
+unconditionally. Then simulate a kill *inside* the node:
 the simplest honest way is to make `send_receipt` raise an exception the
 first time it runs for T-102 (for example by checking a marker file), run
 `crash`/`resume`, and observe the result.
@@ -67,7 +75,10 @@ first time it runs for T-102 (for example by checking a marker file), run
 **Acceptance criteria**
 
 - You can demonstrate a run in which T-102 ends up with two receipts after
-  a resume — the double side effect, reproduced on demand.
+  a resume — the double side effect, reproduced on demand. Count the
+  lines for T-102 in `code/receipts.jsonl`, or call `receipt_count()` in
+  `code/receipt_ledger.py`; the ledger is a real file, so the double
+  receipt is a real record, not a counter in memory.
 - You restore idempotency (by key, upsert, or read-before-write) and the
   same kill-and-resume sequence then produces exactly one receipt per
   ticket.
@@ -132,6 +143,12 @@ rm -f code/temporal_event_log.json
 python code/04_temporal_workflow.py simulate
 python code/04_temporal_workflow.py simulate
 ```
+
+Try the live variant too: `python code/04_temporal_workflow.py simulate
+--live` records real model drafts and verdicts in the event log on the
+first run, and the second run replays them with no new model calls —
+which is the same property the real server gives you, visible in the
+usage totals (the second run adds zero tokens).
 
 Then, if you have Docker or a local Temporal server available, run the real
 thing: `temporal server start-dev` in one terminal, `python

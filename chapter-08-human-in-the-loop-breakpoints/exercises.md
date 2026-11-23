@@ -1,14 +1,23 @@
 # Exercises — Chapter 8: Human-in-the-Loop & Breakpoints
 
-All exercises run from `code/` with the standard library only — no
-API key, no paid service, no Slack or Teams account. The Slack and
-Teams posting functions are stubs by design (see their docstrings);
-every exercise below is completable without them. Run the demo first
-so you know what "working" looks like:
+All exercises run from `code/` with the standard library only. The
+agent runs and the demo need a configured model backend — set
+`LLM_API_KEY` or run with `LLM_BACKEND=opencheap-connector` — because
+the plan step is a real model call and this chapter has no mock
+model. The gate mechanics, the webhook endpoint, and the audit
+exercises need no backend and no chat account. The Slack and Teams
+`post_approval` functions are real delivery calls: they need
+`SLACK_BOT_TOKEN` and `TEAMS_WEBHOOK_URL` respectively, and fail
+loudly without them; `render_local` prints the card JSON so the
+gate can still be reviewed and tested with no account. The simulated
+human clicks in Exercise 4 are real-shaped payloads fed through the
+real interaction handlers — the human is external to the program,
+so the click is supplied as a fixture. Run the demo first so you
+know what "working" looks like:
 
 ```bash
 cd code
-python demo_end_to_end.py
+LLM_BACKEND=opencheap-connector python demo_end_to_end.py
 python -m unittest test_chapter08 -v
 ```
 
@@ -18,9 +27,10 @@ Build on `durable_pause.py`: run an agent that plans a write, pauses
 for approval, and is resumed by a *different* process after the first
 one has exited.
 
-1. Start a run: `python durable_pause.py run --task "Publish the
-   weekly changelog" --approver approver@example.com`. Note the run
-   identifier it prints.
+1. Start a run: `LLM_BACKEND=opencheap-connector python
+   durable_pause.py run --task "Publish the weekly changelog"
+   --approver approver@example.com`. Note the run identifier it
+   prints.
 2. Kill the shell's Python process if it is still running (it should
    already have exited — check that it has), then delete nothing and
    restart nothing yet: confirm with `python durable_pause.py status
@@ -54,7 +64,8 @@ through it, and prove each of its three protections.
    python approval_server.py --port 8765`.
 2. Start a run with the webhook pointed at it:
    `APPROVAL_WEBHOOK_URL=http://127.0.0.1:8765/hooks/approval
-   HITL_WEBHOOK_SECRET=<the same value> python durable_pause.py run
+   HITL_WEBHOOK_SECRET=<the same value>
+   LLM_BACKEND=opencheap-connector python durable_pause.py run
    --task "Publish the weekly changelog"`. Confirm the run reports
    `webhook_delivery: {"delivered": true}`.
 3. Decide over HTTP: sign a decision payload exactly as
@@ -143,11 +154,13 @@ trusted — Slack's `verify_slack_signature` in `slack_gate.py` — and
 why the card JSON alone must never be trusted as proof of who
 clicked.
 
-**Stretch.** Finish `post_approval` in `slack_gate.py` for real:
-create a Slack app, enable interactivity pointed at your approval
-endpoint, set `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET`, and send
-one card with `chat.postMessage` using `slack_sdk`. Keep the
-signature verification in front of the interaction handler.
+**Stretch.** Send a card for real: set `SLACK_BOT_TOKEN` and call
+`post_approval` in `slack_gate.py` to deliver one card with
+`chat.postMessage` to a channel you control, then deliver a Teams
+card with `TEAMS_WEBHOOK_URL` set and `post_approval` in
+`teams_gate.py`. Confirm each delivery from the channel side, and
+confirm that calling either function without its credential raises
+a clear error instead of pretending to send.
 
 ## Exercise 5 — Static versus dynamic breakpoints (Advanced)
 

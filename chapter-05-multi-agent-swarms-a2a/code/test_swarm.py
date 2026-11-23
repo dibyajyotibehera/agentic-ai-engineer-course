@@ -4,17 +4,28 @@ Run from the chapter directory:
 
     python -m unittest discover -s code -v
 
-Standard library only; no model API key needed.
+The deterministic tests need no model and no network: they cover
+typed state passing, the supervisor topology, consensus, bounds and
+the trace, plus the file-backed account lookup and the supervisor's
+handling of a model failure.
+
+The live tests at the end need a configured model backend
+(``LLM_API_KEY`` or ``LLM_BACKEND=opencheap-connector``). When no
+backend is configured, they skip instead of failing: a skipped live
+test means "not run", not "passed".
 """
 
 import json
 import unittest
 from dataclasses import replace
 
+from llm_client import LLMClient, LLMError
 from swarm import (
     BudgetExceeded,  # noqa: F401  (re-exported for exercise use)
     ChecksumError,
     DrafterWorker,
+    ModelDrafterWorker,
+    ModelSentimentWorker,
     PayloadValidationError,
     PolicyResult,
     PolicyWorker,
@@ -30,13 +41,19 @@ from swarm import (
     Worker,
     WrongRecipientError,
     compute_checksum,
+    load_accounts,
     make_envelope,
+    refetch_account,
     resolve_fact_disagreement,
     resolve_majority,
     resolve_weighted,
     validate_envelope,
     validate_policy_result,
 )
+
+
+def _llm_available() -> bool:
+    return LLMClient.has_backend()
 
 
 def make_ticket(**overrides) -> TicketState:
@@ -143,6 +160,22 @@ class TestTypedStatePassing(unittest.TestCase):
             validate_envelope(envelope, expected_recipient="supervisor")
 
 
+class TestAccountFile(unittest.TestCase):
+    def test_researcher_reads_the_real_accounts_file(self):
+        accounts = load_accounts()
+        self.assertEqual(accounts["cust-001"]["plan"], "annual")
+        self.assertEqual(accounts["cust-001"]["renewal_date"], "2026-03-14")
+        self.assertEqual(accounts["cust-002"]["account_status"], "past-due")
+
+    def test_refetch_reads_the_source_of_truth(self):
+        record = refetch_account("cust-001")
+        self.assertEqual(record["renewal_date"], "2026-03-14")
+
+    def test_unknown_customer_is_rejected(self):
+        with self.assertRaises(PayloadValidationError):
+            refetch_account("cust-999")
+
+
 class TestSupervisorTopology(unittest.TestCase):
     def test_full_run_completes_with_three_workers(self):
         result = make_supervisor().run(make_ticket())
@@ -191,6 +224,24 @@ class TestSupervisorTopology(unittest.TestCase):
         result = supervisor.run(make_ticket())
         self.assertEqual(result.status, "partial")
         self.assertTrue(any(e.status == "timeout" for e in result.trace))
+
+    def test_model_failure_is_recorded_and_run_continues_partial(self):
+        # A model-backed worker whose call fails must not crash the
+        # run: the supervisor records the rejection and ends partial.
+        class FailingWorker(Worker):
+            name = "researcher"
+
+            def handle(self, envelope):
+                raise LLMError("model call failed: provider unavailable")
+
+        supervisor = Supervisor(
+            workers=[FailingWorker(), PolicyWorker()],
+            drafter=DrafterWorker(),
+        )
+        result = supervisor.run(make_ticket())
+        self.assertEqual(result.status, "partial")
+        self.assertIsNone(result.draft)
+        self.assertTrue(any(e.status == "rejected" for e in result.trace))
 
 
 class TestConsensus(unittest.TestCase):
@@ -291,6 +342,73 @@ class TestTrace(unittest.TestCase):
             self.assertIn("run_id", record)
             self.assertIn("checksum", record)
             self.assertIn("status", record)
+
+
+@unittest.skipUnless(_llm_available(), "needs a configured LLM backend")
+class TestModelWorkersLive(unittest.TestCase):
+    """Live tests: the model-backed workers against the real model."""
+
+    def test_model_sentiment_scores_a_furious_ticket(self) -> None:
+        client = LLMClient()
+        worker = ModelSentimentWorker(client)
+        envelope = make_envelope(
+            "tkt-1", "supervisor", "sentiment-scorer",
+            make_ticket(
+                body="This is furious and unacceptable. I am cancelling "
+                "unless this is fixed today.",
+            ),
+        )
+        reply = worker.handle(envelope)
+        typed = validate_envelope(reply, expected_recipient="supervisor")
+        self.assertIsInstance(typed, SentimentResult)
+        self.assertEqual(typed.label, "frustrated")
+        self.assertLess(typed.score, 0.5)
+
+    def test_model_sentiment_scores_a_pleased_ticket(self) -> None:
+        client = LLMClient()
+        worker = ModelSentimentWorker(client)
+        envelope = make_envelope(
+            "tkt-1", "supervisor", "sentiment-scorer",
+            make_ticket(
+                body="Thanks, great service, I love how quickly you helped.",
+            ),
+        )
+        reply = worker.handle(envelope)
+        typed = validate_envelope(reply, expected_recipient="supervisor")
+        self.assertIsInstance(typed, SentimentResult)
+        self.assertEqual(typed.label, "pleased")
+        self.assertGreater(typed.score, 0.5)
+
+
+@unittest.skipUnless(_llm_available(), "needs a configured LLM backend")
+class TestLiveSwarmRun(unittest.TestCase):
+    """Live test: the full swarm with model-backed sentiment and draft."""
+
+    def test_live_swarm_completes_with_a_model_draft(self) -> None:
+        client = LLMClient()
+        supervisor = Supervisor(
+            workers=[
+                ResearcherWorker(),
+                PolicyWorker(),
+                ModelSentimentWorker(client),
+            ],
+            drafter=ModelDrafterWorker(client),
+        )
+        result = supervisor.run(make_ticket())
+        self.assertEqual(result.status, "completed")
+        assert result.draft is not None
+        # The model's prose must still carry the verified fact.
+        self.assertIn("2026-03-14", result.draft.reply_text)
+        for claim in result.draft.claims:
+            self.assertIn(
+                claim["provenance"], ("researcher", "policy-checker")
+            )
+        assert result.sentiment is not None
+        self.assertIn(
+            result.sentiment.label, ("frustrated", "neutral", "pleased")
+        )
+        # The supervisor accounted real tokens, not declared ones.
+        self.assertGreater(result.tokens_used, 0)
 
 
 if __name__ == "__main__":

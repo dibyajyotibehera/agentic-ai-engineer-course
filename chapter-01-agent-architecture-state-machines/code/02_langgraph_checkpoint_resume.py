@@ -13,8 +13,32 @@ brand-new process; Act 3 lists the checkpoint history (time travel).
     python 02_langgraph_checkpoint_resume.py resume --thread demo-1
     python 02_langgraph_checkpoint_resume.py history --thread demo-1
 
-No model API key is needed: the "model" is a deterministic mock, so the
-checkpointing behaviour is what you are testing, not a vendor's mood.
+The default run is deterministic — the draft is a template and the
+reviewer is a rule — so the checkpointing behaviour is what you are
+testing, and the outcomes are reproducible: every ticket resolves, every
+ticket gets exactly one receipt, and no completed ticket is reprocessed.
+That determinism is deliberate: the thing being studied here is
+checkpointing and recovery, and a reviewer whose verdicts vary from run
+to run would make the acceptance criteria untestable.
+
+Pass ``--live`` to any of the ``run``, ``crash`` or ``resume`` commands
+and the stand-ins are replaced by real model calls: the draft node
+writes a real reply with a real model and the review node judges it with
+a real model (``live_review.py``). The live run needs a configured model
+backend — ``LLM_API_KEY`` or ``LLM_BACKEND=opencheap-connector`` on a
+machine where the OpenCheap connector is registered — and it prints the
+token and cost totals at the end. The reviewer's verdict is stored in
+state, so the conditional edge routes on the recorded verdict rather
+than calling the model a second time, and a resumed run re-runs only the
+node that was in flight, exactly as the checkpointing model promises.
+
+The receipt is a real side effect in both modes: ``send_receipt`` appends
+to a JSON-lines ledger file (``receipts.jsonl`` next to this file) through
+``receipt_ledger.py``, and a second execution for the same ticket finds
+the existing entry and writes nothing. That is the idempotency the
+chapter demands, enforced by a real file rather than asserted in a
+comment — and Exercise 3, which asks you to break it, breaks a real
+record you can inspect.
 
 How it works
 ------------
@@ -45,7 +69,8 @@ Two things this demo deliberately shows you
    first line on resume. Keep node side effects idempotent (an idempotency
    key, an upsert, a read-before-write check) or a resumed run will repeat
    them. The ``send_receipt`` node in this file is idempotent by design:
-   it records the receipt against the ticket ID and skips duplicates.
+   it records the receipt against the ticket ID in a real ledger file and
+   skips duplicates.
 2. ``MemorySaver`` (the in-memory checkpointer) would make this demo pass
    and production fail: it forgets everything when the process exits. The
    SQLite saver survives a process restart; for a real deployment the
@@ -57,12 +82,13 @@ from __future__ import annotations
 import argparse
 import operator
 import os
-import sqlite3
 import sys
 from typing import Annotated, TypedDict
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
+
+from receipt_ledger import DEFAULT_LEDGER_PATH, receipt_count, record_receipt
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "checkpoints.db")
@@ -98,84 +124,136 @@ class TicketState(TypedDict):
     escalated: Annotated[list[str], operator.add]
     receipts_sent: Annotated[list[str], operator.add]
     outcome: str
+    verdict: str                     # "pass: <reason>" / "fail: <reason>"
+    last_draft: str                  # the latest draft text, for the record
 
 
 def _current(state: TicketState) -> dict:
     return state["tickets"][state["index"]]
 
 
-def draft(state: TicketState) -> dict:
-    ticket = _current(state)
-    attempt = state["attempts"] + 1
-    return {
-        "attempts": attempt,
-        "log": [f"draft {ticket['ticket_id']} (attempt {attempt})"],
-    }
+def _deterministic_verdict(ticket: dict, attempts: int) -> tuple[bool, str]:
+    """The deterministic reviewer: a ticket that needs rework fails draft 1.
 
-
-def review(state: TicketState) -> dict:
-    ticket = _current(state)
-    # Mock reviewer: a ticket that needs rework fails its first draft only.
-    passed = not (ticket["needs_rework"] and state["attempts"] == 1)
-    verdict = "pass" if passed else "fail"
-    return {"log": [f"review {ticket['ticket_id']}: {verdict}"]}
-
-
-def route_after_review(state: TicketState) -> str:
-    """The conditional edge — the cycle's guard, owned by code, not the model."""
-    ticket = _current(state)
-    passed = not (ticket["needs_rework"] and state["attempts"] == 1)
-    if passed:
-        return "finish_ticket"
-    if state["attempts"] >= MAX_ATTEMPTS:
-        return "escalate_ticket"
-    return "draft"  # the back edge
-
-
-def finish_ticket(state: TicketState) -> dict:
-    ticket = _current(state)
-    return {
-        "resolved": [ticket["ticket_id"]],
-        "log": [f"resolve {ticket['ticket_id']}"],
-    }
-
-
-def escalate_ticket(state: TicketState) -> dict:
-    ticket = _current(state)
-    return {
-        "escalated": [ticket["ticket_id"]],
-        "log": [f"escalate {ticket['ticket_id']} (attempts exhausted)"],
-    }
-
-
-def send_receipt(state: TicketState) -> dict:
-    """Idempotent side effect: safe to run twice after a crash mid-node.
-
-    The receipt is recorded against the ticket ID, and a second execution
-    for the same ticket is a no-op. Without this, a kill between "receipt
-    sent" and "checkpoint written" would send the receipt twice on resume.
+    This rule is the controlled variable of the demo. The live engine
+    replaces it with a real model judging a real draft; the verdict is
+    stored in state either way, so the routing edge never re-decides.
     """
-    ticket = _current(state)
-    if ticket["ticket_id"] in state["receipts_sent"]:
-        return {"log": [f"receipt for {ticket['ticket_id']} already sent — skipping"]}
-    return {
-        "receipts_sent": [ticket["ticket_id"]],
-        "log": [f"send receipt for {ticket['ticket_id']}"],
-    }
+    passed = not (ticket["needs_rework"] and attempts == 1)
+    return passed, "pass" if passed else "needs rework"
 
 
-def advance_or_end(state: TicketState) -> str:
-    if state["index"] + 1 >= len(state["tickets"]):
-        return END
-    return "advance"
+def build_graph(checkpointer: SqliteSaver, live_client=None,
+                ledger_path: str | None = None):
+    """Compile the graph. ``live_client`` selects the engine.
 
+    With no client the draft is a template and the review is the
+    deterministic rule; with a real ``LLMClient`` both are real model
+    calls (``live_review``). The nodes are closures over the client so
+    the graph definition stays the same in both modes — the engine is
+    a construction-time choice, not a branch in the workflow.
+    ``ledger_path`` overrides where receipts are recorded (the tests
+    point it at a temporary file); the default is ``receipts.jsonl``
+    next to this file.
+    """
 
-def advance(state: TicketState) -> dict:
-    return {"index": state["index"] + 1, "attempts": 0,
-            "log": ["advance to next ticket"]}
+    def draft(state: TicketState) -> dict:
+        ticket = _current(state)
+        attempt = state["attempts"] + 1
+        if live_client is None:
+            text = (f"draft v{attempt} for {ticket['ticket_id']}: "
+                    f"{ticket['summary']}")
+        else:
+            from live_review import draft_reply
 
+            text = draft_reply(live_client, ticket["ticket_id"],
+                               ticket["summary"], attempt,
+                               needs_rework=ticket["needs_rework"])
+        return {
+            "attempts": attempt,
+            "last_draft": text,
+            "log": [f"draft {ticket['ticket_id']} (attempt {attempt})"],
+        }
 
-def build_graph(checkpointer: SqliteSaver):
+    def review(state: TicketState) -> dict:
+        ticket = _current(state)
+        if live_client is None:
+            passed, reason = _deterministic_verdict(ticket, state["attempts"])
+        else:
+            from live_review import review_draft
+
+            verdict = review_draft(live_client, ticket["ticket_id"],
+                                   state["last_draft"], state["attempts"])
+            passed, reason = bool(verdict["passed"]), str(verdict["reason"])
+        verdict = f"{'pass' if passed else 'fail'}: {reason}"
+        return {
+            "verdict": verdict,
+            "log": [f"review {ticket['ticket_id']}: {verdict}"],
+        }
+
+    def route_after_review(state: TicketState) -> str:
+        """The conditional edge — the cycle's guard, owned by code, not the model.
+
+        Routes on the verdict the review node recorded in state. A state
+        loaded from an older checkpoint that has no verdict yet falls
+        back to the deterministic rule, so old checkpoints still resume.
+        """
+        verdict = state.get("verdict", "")
+        if verdict.startswith("pass"):
+            return "finish_ticket"
+        if verdict.startswith("fail"):
+            if state["attempts"] >= MAX_ATTEMPTS:
+                return "escalate_ticket"
+            return "draft"  # the back edge
+        passed, _reason = _deterministic_verdict(_current(state),
+                                                 state["attempts"])
+        if passed:
+            return "finish_ticket"
+        if state["attempts"] >= MAX_ATTEMPTS:
+            return "escalate_ticket"
+        return "draft"
+
+    def finish_ticket(state: TicketState) -> dict:
+        ticket = _current(state)
+        return {
+            "resolved": [ticket["ticket_id"]],
+            "log": [f"resolve {ticket['ticket_id']}"],
+        }
+
+    def escalate_ticket(state: TicketState) -> dict:
+        ticket = _current(state)
+        return {
+            "escalated": [ticket["ticket_id"]],
+            "log": [f"escalate {ticket['ticket_id']} (attempts exhausted)"],
+        }
+
+    def send_receipt(state: TicketState) -> dict:
+        """Idempotent side effect: safe to run twice after a crash mid-node.
+
+        The receipt is recorded in a real ledger file (``receipts.jsonl``)
+        against the ticket ID, and a second execution for the same ticket
+        appends nothing. Without this, a kill between "receipt sent" and
+        "checkpoint written" would send the receipt twice on resume.
+        """
+        ticket = _current(state)
+        if ticket["ticket_id"] in state["receipts_sent"]:
+            return {"log": [f"receipt for {ticket['ticket_id']} already sent — skipping"]}
+        record_receipt(ticket["ticket_id"],
+                       ledger_path or DEFAULT_LEDGER_PATH)
+        return {
+            "receipts_sent": [ticket["ticket_id"]],
+            "log": [f"send receipt for {ticket['ticket_id']}"],
+        }
+
+    def advance_or_end(state: TicketState) -> str:
+        if state["index"] + 1 >= len(state["tickets"]):
+            return END
+        return "advance"
+
+    def advance(state: TicketState) -> dict:
+        return {"index": state["index"] + 1, "attempts": 0, "verdict": "",
+                "last_draft": "", "log": ["advance to next ticket"]}
+
     builder = StateGraph(TicketState)
     builder.add_node("draft", draft)
     builder.add_node("review", review)
@@ -204,13 +282,30 @@ def _config(thread_id: str) -> dict:
 def initial_state() -> TicketState:
     return TicketState(tickets=TICKETS, index=0, attempts=0, log=[],
                        resolved=[], escalated=[], receipts_sent=[],
-                       outcome="")
+                       outcome="", verdict="", last_draft="")
 
 
-def cmd_crash(thread_id: str, after: int) -> int:
+def _live_client_or_none(live: bool):
+    """Build the model client for a live run; fail loudly with no backend."""
+    if not live:
+        return None
+    from llm_client import LLMClient
+
+    return LLMClient()
+
+
+def _report_usage(client) -> None:
+    if client is not None:
+        print(f"[live] model usage: {client.total_prompt_tokens} prompt + "
+              f"{client.total_completion_tokens} completion tokens, "
+              f"cost ${client.total_cost_usd:.4f}")
+
+
+def cmd_crash(thread_id: str, after: int, live: bool = False) -> int:
     """Start the run, stream ``after`` super-steps, then die (exit code 99)."""
+    client = _live_client_or_none(live)
     with SqliteSaver.from_conn_string(DB_PATH) as saver:
-        graph = build_graph(saver)
+        graph = build_graph(saver, live_client=client)
         steps = 0
         for _update in graph.stream(initial_state(), _config(thread_id),
                                     stream_mode="updates"):
@@ -218,21 +313,27 @@ def cmd_crash(thread_id: str, after: int) -> int:
             if steps >= after:
                 print(f"[crash] process dying after {steps} super-steps "
                       f"(simulated kill, exit code 99)")
+                _report_usage(client)  # the process dies below, so report now
                 sys.stdout.flush()
                 os._exit(99)  # no cleanup: this is what a kill looks like
     return 0
 
 
-def cmd_resume(thread_id: str) -> int:
+def cmd_resume(thread_id: str, live: bool = False) -> int:
     """Resume the same thread in a fresh process; ``None`` = continue."""
+    client = _live_client_or_none(live)
     with SqliteSaver.from_conn_string(DB_PATH) as saver:
-        graph = build_graph(saver)
+        graph = build_graph(saver, live_client=client)
         result = graph.invoke(None, _config(thread_id))
     print(f"[resume] resolved={result['resolved']} "
           f"escalated={result['escalated']} "
           f"receipts={result['receipts_sent']}")
     print(f"[resume] {len(result['log'])} log lines; "
           f"no completed ticket was reprocessed.")
+    for ticket_id in result["receipts_sent"]:
+        print(f"[resume] ledger holds {receipt_count(ticket_id)} receipt(s) "
+              f"for {ticket_id}")
+    _report_usage(client)
     return 0
 
 
@@ -254,34 +355,48 @@ def cmd_history(thread_id: str) -> int:
     return 0
 
 
-def cmd_run(thread_id: str) -> int:
+def cmd_run(thread_id: str, live: bool = False) -> int:
     """Run to completion without a crash, for comparison."""
+    client = _live_client_or_none(live)
     with SqliteSaver.from_conn_string(DB_PATH) as saver:
-        graph = build_graph(saver)
+        graph = build_graph(saver, live_client=client)
         result = graph.invoke(initial_state(), _config(thread_id))
     print(f"[run] resolved={result['resolved']} escalated={result['escalated']}")
+    _report_usage(client)
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Cyclic LangGraph workflow with SQLite checkpointing.")
+    parser.add_argument(
+        "--live", action="store_true",
+        help="use a real model for drafting and reviewing "
+             "(needs LLM_API_KEY or LLM_BACKEND=opencheap-connector)")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("run", "resume", "history"):
         p = sub.add_parser(name)
         p.add_argument("--thread", default="demo-1")
+        p.add_argument(
+            "--live", action="store_true", default=argparse.SUPPRESS,
+            help="use a real model for drafting and reviewing "
+                 "(needs LLM_API_KEY or LLM_BACKEND=opencheap-connector)")
     p = sub.add_parser("crash")
     p.add_argument("--thread", default="demo-1")
     p.add_argument("--after", type=int, default=2,
                    help="super-steps to complete before dying")
+    p.add_argument(
+        "--live", action="store_true", default=argparse.SUPPRESS,
+        help="use a real model for drafting and reviewing "
+             "(needs LLM_API_KEY or LLM_BACKEND=opencheap-connector)")
     args = parser.parse_args(argv)
     if args.command == "crash":
-        return cmd_crash(args.thread, args.after)
+        return cmd_crash(args.thread, args.after, live=args.live)
     if args.command == "resume":
-        return cmd_resume(args.thread)
+        return cmd_resume(args.thread, live=args.live)
     if args.command == "history":
         return cmd_history(args.thread)
-    return cmd_run(args.thread)
+    return cmd_run(args.thread, live=args.live)
 
 
 if __name__ == "__main__":

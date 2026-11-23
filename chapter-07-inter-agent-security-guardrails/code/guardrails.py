@@ -4,10 +4,11 @@ approval gates and audit logging.
 This module is the runnable core of Chapter 7. It uses only the Python
 standard library and needs no model API key, because the point of this
 chapter is not the model: the point is the harness around the model.
-The "model" in ``demo_agent.py`` is a small deterministic stand-in, so
-every attack in the exercises can be run, observed and blocked without
-paying for inference or depending on a hosted model behaving the same
-way twice.
+The model itself lives in ``demo_agent.py``, which calls a real model
+through ``llm_client.py``; the guardrails in this module are
+deterministic, so every attack in the exercises can be run, observed
+and blocked, and the live tests in ``test_guardrails.py`` cover the
+model-facing behaviour against the real model.
 
 The design follows one rule throughout: everything an agent reads is
 data until proven otherwise. Instructions may come only from the
@@ -18,10 +19,16 @@ four layers that fail independently:
 
 1.  Provenance tagging. Every piece of content carries its source and
     a trust level. Untrusted content is never silently promoted.
-2.  A sanitisation proxy. Untrusted content passes through a proxy
-    before it reaches the model. The proxy strips instruction-like
-    text, removes invisible characters, and redacts secret-shaped
-    values, and it records exactly what it removed.
+2.  A sanitisation proxy, backed by a language-model judge.
+    Untrusted content passes through a proxy before it reaches the
+    model. The proxy strips instruction-like text, removes invisible
+    characters, and redacts secret-shaped values, and it records
+    exactly what it removed. The judge in ``injection_judge.py`` is
+    the second half of this layer: it reads the same content as data
+    and returns a structured verdict on whether it tries to instruct
+    the agent, so a well-paraphrased injection that the proxy's
+    patterns miss still has to fool a model told to look for exactly
+    that.
 3.  Least-privilege tool scoping. Each tool declares the scopes it
     needs, a risk tier, and a pinned description hash. A tool whose
     description has changed since review is refused until a human

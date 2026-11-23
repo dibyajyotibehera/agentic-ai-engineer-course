@@ -1,25 +1,25 @@
 """Slack approval gate: Block Kit card in, signed interaction out.
 
 This module is the Slack half of the chapter's chat-user-interface
-gate, and it is deliberately split into two parts with different
-readiness:
+gate. Two parts of it run with no credentials at all:
 
-* **Ready to run with no credentials** — :func:`build_approval_blocks`
-  builds the Block Kit JSON for an approval card, and
-  :func:`verify_slack_signature` implements Slack's request
-  verification (Hash-based Message Authentication Code using the
-  SHA-256 hash function over ``v0:<timestamp>:<raw body>``, compared
-  in constant time, with a five-minute replay window — exactly as
-  Slack documents it). :func:`handle_interaction_payload` parses a
-  ``block_actions`` payload into a decision the agent can act on.
-  All three are exercised by the tests and by ``demo_end_to_end.py``.
-* **TODO — needs a real Slack app** — :func:`post_approval` actually
-  sends the card with ``chat.postMessage``. That needs a bot token
-  (``SLACK_BOT_TOKEN``), a channel, and an app with interactivity
-  enabled and pointed at your approval endpoint. Until those exist
-  it raises ``NotImplementedError`` with the exact setup steps, and
-  :func:`render_local` prints the card JSON instead so the shape of
-  the gate can still be reviewed and tested.
+* :func:`build_approval_blocks` builds the Block Kit JSON for an
+  approval card, and :func:`verify_slack_signature` implements
+  Slack's request verification (Hash-based Message Authentication
+  Code using the SHA-256 hash function over
+  ``v0:<timestamp>:<raw body>``, compared in constant time, with a
+  five-minute replay window — exactly as Slack documents it).
+  :func:`handle_interaction_payload` parses a ``block_actions``
+  payload into a decision the agent can act on. All three are
+  exercised by the tests and by ``demo_end_to_end.py``.
+* :func:`post_approval` really sends the card with
+  ``chat.postMessage`` over Hypertext Transfer Protocol, using the
+  standard library only. It needs a bot token (``SLACK_BOT_TOKEN``),
+  a channel, and an app with interactivity enabled and pointed at
+  your approval endpoint. Without a token it fails loudly instead
+  of pretending to send; :func:`render_local` prints the card JSON
+  instead so the shape of the gate can still be reviewed and tested
+  with no Slack account.
 
 Why the split matters: the approval *decision* is a security boundary,
 and the card is only its presentation. The code that turns a button
@@ -41,8 +41,11 @@ import hmac
 import json
 import os
 import time
+import urllib.error
+import urllib.request
 
 MAX_TIMESTAMP_SKEW_SECONDS = 5 * 60  # five minutes, per Slack's docs
+SLACK_API_URL = "https://slack.com/api/chat.postMessage"
 
 
 def build_approval_blocks(approval: dict) -> list[dict]:
@@ -183,33 +186,65 @@ def render_local(approval: dict) -> str:
 
 
 def post_approval(approval: dict, channel: str) -> dict:
-    """TODO: send the approval card to Slack with ``chat.postMessage``.
+    """Send the approval card to Slack with ``chat.postMessage``.
 
-    Not runnable yet — it needs a real Slack app, which this chapter
-    does not provision for you. To finish it:
+    Needs a real Slack app: create one, enable interactivity, and
+    set its request URL to your approval endpoint (the server in
+    ``approval_server.py``). Give the app the ``chat:write`` scope,
+    install it, and set ``SLACK_BOT_TOKEN`` (``xoxb-...``) and
+    ``SLACK_SIGNING_SECRET`` in the environment. The call uses the
+    standard library only — no ``slack_sdk`` dependency — and
+    verifies every inbound interaction with
+    :func:`verify_slack_signature` before calling
+    :func:`handle_interaction_payload`.
 
-    1. Create a Slack app, enable interactivity, and set its request
-       URL to your approval endpoint (the server in
-       ``approval_server.py``).
-    2. Give the app the ``chat:write`` scope, install it, and set
-       ``SLACK_BOT_TOKEN`` (``xoxb-...``) and ``SLACK_SIGNING_SECRET``
-       in the environment.
-    3. Replace the ``raise`` below with a ``chat.postMessage`` call
-       carrying ``text`` and ``blocks`` from :func:`render_local`,
-       using the ``slack_sdk`` package (``pip install slack_sdk``),
-       and verify every inbound interaction with
-       :func:`verify_slack_signature` before calling
-       :func:`handle_interaction_payload`.
-
-    Until then, call :func:`render_local` and inspect the card JSON.
+    Without a token it raises ``RuntimeError`` with the setup steps,
+    instead of pretending the card was sent. On a Slack-side error
+    (``{"ok": false, ...}``) it raises ``RuntimeError`` carrying
+    Slack's error, so a failed delivery is never mistaken for a
+    delivered approval. Returns Slack's response, including the
+    message timestamp (``ts``) on success.
     """
     token = os.environ.get("SLACK_BOT_TOKEN")
     if not token:
-        raise NotImplementedError(
-            "Slack posting is a stub: set SLACK_BOT_TOKEN and finish the"
-            " chat.postMessage call in post_approval (see its docstring)."
+        raise RuntimeError(
+            "No Slack bot token: set SLACK_BOT_TOKEN (xoxb-...) after "
+            "creating a Slack app with the chat:write scope and "
+            "interactivity pointed at your approval endpoint. "
+            "Until then, call render_local and inspect the card JSON."
         )
-    raise NotImplementedError(
-        "Slack posting is a stub: the chat.postMessage call in"
-        " post_approval still needs to be written (see its docstring)."
+    message = {
+        "channel": channel,
+        "text": f"Approval requested for run {approval['run_id']}",
+        "blocks": build_approval_blocks(approval),
+    }
+    # SLACK_API_URL is an override seam for tests, so the delivery
+    # can be exercised against a local server; production uses the
+    # default Slack endpoint.
+    url = os.environ.get("SLACK_API_URL", SLACK_API_URL)
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(message).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json; charset=utf-8",
+            "Authorization": "Bearer " + token,
+        },
+        method="POST",
     )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            result = json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode(errors="replace")[:500]
+        raise RuntimeError(
+            f"Slack chat.postMessage returned HTTP {error.code}: {detail}"
+        ) from None
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        raise RuntimeError(
+            f"Slack chat.postMessage did not complete: {error}"
+        ) from None
+    if not result.get("ok"):
+        raise RuntimeError(
+            f"Slack chat.postMessage failed: {result.get('error')}"
+        )
+    return result

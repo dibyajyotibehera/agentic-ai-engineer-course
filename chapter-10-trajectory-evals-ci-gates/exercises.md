@@ -1,8 +1,12 @@
 # Chapter 10 — Exercises
 
-Work in `code/`. Everything except the optional language-model judge
-runs on the standard library, with no network and no API key. Run
-the tests first so you know what the finished pieces promise:
+Work in `code/`. Everything except the live judge and claim checker
+runs on the standard library, with no network and no API key. The
+live path — `LLMJudge`, `LLMClaimChecker`, and `demo_live.py` —
+needs a configured model backend: your own key (`LLM_API_KEY`) or
+`LLM_BACKEND=opencheap-connector` on a machine where the OpenCheap
+connector is registered. Run the tests first so you know what the
+finished pieces promise:
 
 ```bash
 cd code
@@ -116,8 +120,11 @@ messages to be twice as long without fixing the underlying problem,
 and re-grade them. Then swap the presentation order of two
 candidates in a pairwise comparison and see whether the verdict
 changes. (The mock judge does not have position bias — so for the
-second half, use the `LLMJudge` with your own API key, or describe
-from the lesson what you would expect and why.)
+second half, use the `LLMJudge` with a configured backend; see
+`code/demo_live.py` for the setup, and `code/README.md` for the two
+ways to configure it. The fixed `MockJudge` is the instrument you
+measure agreement against, not the judge you test for bias: a bias
+experiment needs a judge whose verdict can actually move.)
 
 **Acceptance criteria:**
 

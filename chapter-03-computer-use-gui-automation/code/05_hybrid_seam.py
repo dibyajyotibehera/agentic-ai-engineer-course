@@ -10,9 +10,15 @@ unknown step, and a DOM check routed through the differ's verdict function
 Scenario: a pop-up dialog appears at a random position on the form page,
 with a randomly labelled dismiss button. The scripted driver cannot know
 where it will appear, so that step is delegated: the labeller marks the
-dialog, the chooser selects the dismiss mark, and a DOM check routed
-through the differ's verdict function (`verify_dismissed` in `_seam.py`)
-verifies the dialog is gone before the scripted form fill resumes.
+dialog, the vision model selects the dismiss mark from the marked
+screenshot (``choose_mark_with_real_model``, via ``llm_client.py`` —
+the Chapter 7 client copied into this chapter), and a DOM check routed
+through the differ's verdict function (``verify_dismissed`` in ``_seam.py``)
+verifies the dialog is gone before the scripted form fill resumes. When
+no model backend is configured, the deterministic ``choose_mark`` in
+``_seam.py`` stands in (pass ``--mock`` to force it); it matches on the
+button's label text, so it is a generous stand-in for a model that has
+to read the label off the screenshot.
 
 The seam is a state handoff with a failure policy, both implemented here:
   * what the actor passes in: URL, screenshot, labelled elements;
@@ -27,12 +33,13 @@ The seam is a state handoff with a failure policy, both implemented here:
 Run:
     pip install -r requirements.txt
     playwright install chromium
-    python 05_hybrid_seam.py [--self-test]
+    LLM_BACKEND=opencheap-connector python 05_hybrid_seam.py [--self-test]
 
 --self-test exercises the failure policy and the mark allow-list without a
 browser, so the seam logic is verifiable even where Playwright is not
 installed. Add --approve to pause for a human y/n before the final submit
-(the Chapter 8 human-in-the-loop pattern in miniature).
+(the Chapter 8 human-in-the-loop pattern in miniature). Add --mock to
+force the deterministic label-matching chooser instead of the real model.
 """
 
 from __future__ import annotations
@@ -85,6 +92,64 @@ POPUP_HTML = """<!doctype html>
 """
 
 
+def annotate_marks(screenshot_path: Path, marks: list[MarkedElement],
+                   output_path: Path) -> Path:
+    """Draw numbered Set-of-Mark markers at the marks' centres.
+
+    The model chooses from the marked image, not from a bare list of
+    labels: the labels are in the prompt for grounding, but the
+    selection itself is visual, which is the point of the exercise.
+    The marker is a red circle with the number, centred on the
+    element (the dialog buttons are large enough that the marker
+    does not hide the label).
+    """
+    from PIL import Image, ImageDraw
+
+    image = Image.open(screenshot_path).convert("RGB")
+    draw = ImageDraw.Draw(image)
+    for mark in marks:
+        cx, cy = mark.centre
+        draw.ellipse([cx - 11, cy - 11, cx + 11, cy + 11],
+                     fill=(220, 38, 38))
+        draw.text((cx - 4, cy - 6), str(mark.number), fill=(255, 255, 255))
+    image.save(output_path)
+    return output_path
+
+
+def choose_mark_with_real_model(screenshot_path: Path,
+                                marks: list[MarkedElement],
+                                client) -> int | None:
+    """Ask a real vision model which marked button dismisses the dialog.
+
+    The model sees the screenshot with numbered markers and the list
+    of mark numbers and labels, and answers with a single integer.
+    The allow-list is enforced here, not trusted to the model: a
+    number that is not one of the marks is rejected (returns None),
+    exactly as an unmarked coordinate is rejected. Returns None
+    when the reply carries no usable mark number.
+    """
+    import re
+
+    annotated_path = OUTPUT_DIR / "seam_annotated.png"
+    annotate_marks(screenshot_path, marks, annotated_path)
+    labels = ", ".join(f"{m.number}={m.name!r}" for m in marks)
+    prompt = (
+        "The image shows a pop-up dialog with numbered markers on its "
+        "buttons. Which marker is on the button that dismisses the dialog "
+        "(the button that closes it, labelled 'Dismiss', 'Close', "
+        f"'Not now' or 'Got it')? The marks are: {labels}. Answer with a "
+        "single integer and nothing else."
+    )
+    reply = client.complete_with_image(
+        annotated_path, prompt, model=client.judge_model, temperature=0.0,
+    )
+    match = re.search(r"\d+", reply or "")
+    if not match:
+        return None
+    picked = int(match.group(0))
+    return picked if any(m.number == picked for m in marks) else None
+
+
 def self_test() -> int:
     """Exercise the seam policy without a browser."""
     print("Self-test: failure policy and mark allow-list (no browser).")
@@ -122,11 +187,30 @@ def main() -> int:
                         help="test the seam policy without a browser")
     parser.add_argument("--approve", action="store_true",
                         help="pause for human y/n before the final submit")
+    parser.add_argument("--mock", action="store_true",
+                        help="force the deterministic label-matching chooser "
+                             "instead of the real vision model")
     parser.add_argument("--seed", type=int, default=11)
     args = parser.parse_args()
 
     if args.self_test:
         return self_test()
+
+    # The delegated step calls a real vision model by default; the
+    # deterministic label-matching chooser is the no-backend fallback.
+    client = None
+    if not args.mock:
+        from llm_client import LLMClient
+
+        if LLMClient.has_backend():
+            client = LLMClient()
+            print(f"Delegated step uses the real vision model "
+                  f"(route {client.judge_model}).")
+        else:
+            print("No model backend configured; the delegated step uses "
+                  "the deterministic label-matching chooser. Run with "
+                  "LLM_BACKEND=opencheap-connector or LLM_API_KEY set "
+                  "for the real-model delegation.")
 
     try:
         from playwright.sync_api import sync_playwright
@@ -176,7 +260,10 @@ def main() -> int:
                 page.screenshot(path=str(handoff.screenshot_path))
                 print(f"Handoff: {handoff.describe()}")
 
-                picked = choose_mark("dismiss", marks)
+                picked = (choose_mark_with_real_model(
+                    handoff.screenshot_path, marks, client)
+                    if client is not None
+                    else choose_mark("dismiss", marks))
                 if picked is None:
                     record.attempt(verified=False,
                                    evidence=str(handoff.screenshot_path))
@@ -217,6 +304,12 @@ def main() -> int:
             page.locator("#confirmation").wait_for(state="visible")
             print("Confirmation:",
                   page.locator("#confirmation").inner_text())
+            if client is not None:
+                print(f"Model usage for the delegated step: "
+                      f"{client.total_prompt_tokens:,} prompt + "
+                      f"{client.total_completion_tokens:,} completion tokens"
+                      + (f", ${client.total_cost_usd:.4f}"
+                         if client.total_cost_usd else " (no cost reported)"))
             print("OK — hybrid run complete: scripted steps, one delegated "
                   "step, verified at the seam.")
             return 0

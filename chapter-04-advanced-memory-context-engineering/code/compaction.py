@@ -29,13 +29,30 @@ the exercises, not a tokenizer; replace it with a real tokenizer when
 you wire in a model. The 5,000-token tool output summarised to roughly
 500 tokens in the lesson is a worked example, not a measured figure.
 
-No API key and no paid service are needed to run this module.
-Standard library only.
+Two summarisation paths live in this module, and they are not the
+same thing. :func:`compact` and the default ``summarise`` strategy
+of :func:`prune_tool_result` are deterministic and offline: they keep
+verbatim turns and reduce the rest to a head excerpt, which is
+labelled as an excerpt, not a summary. :func:`compact_with_llm` and
+:func:`prune_tool_result_with_llm` call a real model through
+``llm_summariser.py`` (cheap judge route, temperature zero, small
+``max_tokens``) and need a configured model backend
+(``LLM_API_KEY`` or ``LLM_BACKEND=opencheap-connector``). Run the
+live paths with ``python compaction.py --live``.
+
+No API key and no paid service are needed to run the deterministic
+paths in this module. Standard library only, plus ``llm_client.py``
+and ``llm_summariser.py`` in this directory for the live paths.
 """
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
+from typing import Callable
+
+from llm_client import LLMClient
+from llm_summariser import summarise_tool_result, summarise_transcript_turns
 
 # MemGPT's pressure constant (arXiv:2310.08560): warn at
 # about 70% of the context window. Compaction is triggered at that
@@ -226,6 +243,77 @@ def compact(
     )
 
 
+def compact_with_llm(
+    client: LLMClient,
+    transcript: list[TranscriptTurn],
+    load_bearing_facts: list[str],
+    *,
+    keep_recent_turns: int = 2,
+    max_tokens: int = 1500,
+) -> CompactedState:
+    """Rewrite the transcript into a compact state summary, with a real model.
+
+    The live version of :func:`compact`, with the same contract and the
+    same audit: load-bearing turns and the most recent turns are kept
+    verbatim, and the load-bearing facts the caller named are appended
+    verbatim and checked, so ``complete`` is False if any is missing.
+    The difference is the middle: instead of reducing every other turn
+    to a head excerpt, the non-verbatim turns are summarised by a real
+    model call (``llm_summariser.summarise_transcript_turns``, cheap
+    judge route, temperature zero). The model never sees the
+    load-bearing facts as material to paraphrase -- they are appended
+    by this function after the model replies -- so a fact cannot be
+    silently reworded away. A failed or empty model reply raises
+    instead of falling back to the excerpt path.
+    """
+    tokens_before = sum(estimate_tokens(turn.text) for turn in transcript)
+    verbatim: list[TranscriptTurn] = []
+    compressible: list[TranscriptTurn] = []
+    dropped = 0
+    for index, turn in enumerate(transcript):
+        is_recent = index >= len(transcript) - keep_recent_turns
+        if turn.load_bearing or is_recent:
+            verbatim.append(turn)
+        elif turn.role == "tool":
+            # Verbatim tool output already consumed: dropped, not
+            # summarised. Its conclusions survive as load-bearing
+            # facts, not as raw output -- same rule as compact().
+            dropped += 1
+        else:
+            compressible.append(turn)
+
+    lines: list[str] = ["STATE SUMMARY (compacted transcript):"]
+    for turn in verbatim:
+        lines.append(f"- [{turn.role}] {turn.text}")
+    summarised = 0
+    if compressible:
+        turns_text = "\n".join(f"[{turn.role}] {turn.text}" for turn in compressible)
+        model_summary = summarise_transcript_turns(
+            client, turns_text, max_tokens=max_tokens
+        )
+        lines.append("EARLIER TURNS (model summary):")
+        for line in model_summary.strip().splitlines():
+            lines.append(f"- {line}" if not line.startswith("-") else line)
+        summarised = len(compressible)
+
+    lines.append("LOAD-BEARING FACTS:")
+    for fact in load_bearing_facts:
+        lines.append(f"- {fact}")
+    summary = "\n".join(lines)
+
+    missing = [fact for fact in load_bearing_facts if fact not in summary]
+    return CompactedState(
+        summary=summary,
+        tokens_before=tokens_before,
+        tokens_after=estimate_tokens(summary),
+        turns_kept_verbatim=len(verbatim),
+        turns_summarised=summarised,
+        turns_dropped=dropped,
+        load_bearing_preserved=[f for f in load_bearing_facts if f not in missing],
+        load_bearing_missing=missing,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tool-result pruning
 # ---------------------------------------------------------------------------
@@ -253,13 +341,19 @@ def prune_tool_result(
     keep_fields: list[str] | None = None,
     pointer_id: str | None = None,
     expired: bool = False,
+    summariser: Callable[[str], str] | None = None,
 ) -> PrunedResult:
     """Prune one tool result before it enters the prompt.
 
-    * ``summarise`` -- keep the head of the output plus a marker that it
-      was summarised. The caller should replace this with a real
-      summary (the conclusion and the figures the plan depends on) in
-      production; the head is a stand-in, as in ``TokenBudget.compress``.
+    * ``summarise`` -- with ``summariser`` given (a callable taking
+      the full text and returning a summary, for example a partial
+      application of ``llm_summariser.summarise_tool_result`` bound
+      to a client -- see :func:`prune_tool_result_with_llm`), the
+      result is summarised by a real model: the conclusion and the
+      figures the plan depends on. Without one, the head of the
+      output is kept and labelled as a head excerpt, not a summary:
+      the head is a placeholder, as in ``TokenBudget.compress``,
+      and calling it a summary would overstate what it is.
     * ``fields`` -- keep only the lines naming one of ``keep_fields``;
       the rest of the record is dropped. Use when the next step needs
       two fields of a large record.
@@ -274,7 +368,13 @@ def prune_tool_result(
     """
     tokens_before = estimate_tokens(text)
     if strategy == "summarise":
-        pruned = f"SUMMARY: {text[:SUMMARY_HEAD_CHARS]}... [tool output summarised]"
+        if summariser is not None:
+            pruned = summariser(text)
+            return PrunedResult(pruned, strategy, tokens_before, estimate_tokens(pruned))
+        pruned = (
+            f"HEAD EXCERPT (not a model summary): {text[:SUMMARY_HEAD_CHARS]}... "
+            "[pass a summariser for a real summary]"
+        )
         return PrunedResult(pruned, strategy, tokens_before, estimate_tokens(pruned))
     if strategy == "fields":
         if not keep_fields:
@@ -304,6 +404,35 @@ def prune_tool_result(
                                  strategy, tokens_before, 0)
         return PrunedResult(text, strategy, tokens_before, tokens_before)
     raise ValueError(f"unknown pruning strategy: {strategy!r}")
+
+
+def prune_tool_result_with_llm(
+    client: LLMClient,
+    text: str,
+    *,
+    strategy: str = "summarise",
+    keep_fields: list[str] | None = None,
+    pointer_id: str | None = None,
+    expired: bool = False,
+    max_tokens: int = 1000,
+) -> PrunedResult:
+    """Prune one tool result with a real model for the ``summarise`` strategy.
+
+    Identical to :func:`prune_tool_result` for the other strategies;
+    for ``summarise`` it calls the model (cheap judge route,
+    temperature zero) instead of keeping a head excerpt. Needs a
+    configured model backend.
+    """
+    return prune_tool_result(
+        text,
+        strategy=strategy,
+        keep_fields=keep_fields,
+        pointer_id=pointer_id,
+        expired=expired,
+        summariser=(lambda t: summarise_tool_result(client, t, max_tokens=max_tokens))
+        if strategy == "summarise"
+        else None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -474,5 +603,59 @@ def demo() -> None:
     print(f"deferred: {deferred}")
 
 
+def demo_live() -> None:
+    """Run the support-copilot long-run scenario against a real model.
+
+    Same scenario as :func:`demo`, but the compaction and the
+    tool-result summary are real model calls, and the run reports the
+    model's token usage and cost. Needs a configured model backend.
+    """
+    client = LLMClient()
+    transcript = [
+        TranscriptTurn("Refunds within 30 days need no approval.",
+                       role="system", is_instruction=True)
+        for _ in range(12)
+    ] + [
+        TranscriptTurn("Customer asks about a refund on day 20.",
+                       role="user", load_bearing=True),
+        TranscriptTurn("Checking the billing record.", role="assistant"),
+    ]
+    facts = [
+        "Refund policy is 14 days with manager approval (June, supersedes March).",
+        "Customer's plan is business, renewal 2027-03-01.",
+        "Tried re-issuing the invoice; it did not resolve the billing error.",
+    ]
+    print("=== Live compaction (real model) ===")
+    state = compact_with_llm(client, transcript, facts)
+    print(f"{state.tokens_before} -> {state.tokens_after} tokens; "
+          f"kept {state.turns_kept_verbatim} verbatim, "
+          f"summarised {state.turns_summarised}, dropped {state.turns_dropped}")
+    print(f"compaction complete (all load-bearing facts preserved): {state.complete}")
+    print("--- compacted summary ---")
+    print(state.summary)
+
+    print("\n=== Live tool-result pruning (real model) ===")
+    billing_record = "\n".join(
+        [
+            "plan: business",
+            "renewal date: 2027-03-01",
+            "seats: 42",
+            "past invoices: " + "INV-1001 $480, " * 40,
+            "usage notes: " + "daily sync at 02:00, " * 40,
+        ]
+    )
+    pruned = prune_tool_result_with_llm(client, billing_record, strategy="summarise")
+    print(f"summarise: {pruned.tokens_before} -> {pruned.tokens_after} tokens "
+          f"(saved {pruned.tokens_saved})")
+    print(f"summary: {pruned.text}")
+
+    print(f"\nModel usage for this run: {client.total_prompt_tokens} prompt + "
+          f"{client.total_completion_tokens} completion tokens, "
+          f"cost ${client.total_cost_usd:.6f}")
+
+
 if __name__ == "__main__":
-    demo()
+    if "--live" in sys.argv:
+        demo_live()
+    else:
+        demo()

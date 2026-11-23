@@ -17,6 +17,15 @@ is not.
 Run:
     pip install -r requirements.txt
     python 03_screenshot_diff.py [--threshold 30]
+    python 03_screenshot_diff.py --before real_before.png --after real_after.png
+
+With --before/--after the differ runs on two real screenshot files
+instead of the generated pair — that is how the Exercise 3 stretch
+runs it on the Exercise 1 form page before and after submission.
+Without them it generates the synthetic pair, which is a deliberate
+test fixture (a form page with a blinking cursor and an animated
+banner as noise), not a stand-in for a model or for real input:
+the differ itself is real pixel arithmetic either way.
 
 Outputs (in code/output/):
   diff_before.png, diff_after.png — the two synthetic screenshots.
@@ -26,6 +35,7 @@ Outputs (in code/output/):
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -152,11 +162,29 @@ def main() -> int:
     parser.add_argument("--threshold", type=int, default=30,
                         help="per-channel pixel difference that counts as a "
                              "change (0-255; default 30)")
+    parser.add_argument("--before", type=Path, default=None,
+                        help="real 'before' screenshot file (with --after, "
+                             "diffs two real images instead of generating "
+                             "the synthetic pair)")
+    parser.add_argument("--after", type=Path, default=None,
+                        help="real 'after' screenshot file")
     args = parser.parse_args()
     OUTPUT_DIR.mkdir(exist_ok=True)
 
-    before = make_screenshot(filled=False, cursor_on=False)
-    after = make_screenshot(filled=True, cursor_on=True)
+    if bool(args.before) != bool(args.after):
+        print("--before and --after must be given together.", file=sys.stderr)
+        return 2
+    if args.before is not None:
+        before = Image.open(args.before).convert("RGB")
+        after = Image.open(args.after).convert("RGB")
+        if before.size != after.size:
+            print(f"Size mismatch: before is {before.size}, after is "
+                  f"{after.size}; the differ needs same-size images.",
+                  file=sys.stderr)
+            return 2
+    else:
+        before = make_screenshot(filled=False, cursor_on=False)
+        after = make_screenshot(filled=True, cursor_on=True)
     before.save(OUTPUT_DIR / "diff_before.png")
     after.save(OUTPUT_DIR / "diff_after.png")
 
@@ -169,8 +197,9 @@ def main() -> int:
               "(over 40% of the screen changed).")
     else:
         print(f"Changed regions ({len(boxes)}):")
+        width, height = after.size
         for (x0, y0, x1, y1) in boxes:
-            area_pct = 100.0 * (x1 - x0) * (y1 - y0) / (WIDTH * HEIGHT)
+            area_pct = 100.0 * (x1 - x0) * (y1 - y0) / (width * height)
             print(f"  box ({x0}, {y0})-({x1}, {y1}): {area_pct:.2f}% of screen")
 
     annotated = after.copy()
@@ -180,6 +209,7 @@ def main() -> int:
     annotated.save(OUTPUT_DIR / "diff.png")
     print(f"Diff image: {OUTPUT_DIR / 'diff.png'}")
 
+    width, height = after.size
     field_box = [box for box in boxes
                  if box[2] - box[0] > 50 and 90 < box[1] < 160]
     cursor_box = [box for box in boxes

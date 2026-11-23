@@ -10,7 +10,18 @@ Alert thresholds in the report follow the LLM course deployment
 section (https://github.com/mlabonne/llm-course): 95th percentile
 latency above 2 seconds, error rate above 5%, memory above 90%.
 
-No API key or paid service is needed: every provider is a mock.
+No API key is needed for the deterministic drill: the providers are
+scripted rungs that fail on a fixed schedule, which is the failure
+injection the drill is studied with -- the drill must take the
+primary offline on demand, and no real provider can be taken
+offline on demand. The serving rungs in the live drill (``live_drill``)
+are instead real model calls, and need a configured model backend
+(``LLM_BACKEND=opencheap-connector`` on the author's machine, or
+``LLM_API_KEY``); the live drill is skipped with a note when no
+backend is configured. There is no second provider on this backend,
+so the different-provider rung stays scripted even in the live
+drill, and the drill says so -- a second provider would need its
+own key in production.
 Run:  python degraded_agent.py
 """
 
@@ -21,14 +32,24 @@ import time
 
 from circuit_breaker import CircuitBreaker, FakeClock, ProviderError
 from cost_kill_switch import Budgets, CostMeter
-from model_cascade import ModelCascade, Rung
+from model_cascade import LiveRung, ModelCascade, Rung
 from offline_queue import OfflineQueue
 
 
 class DegradedAgent:
-    """One agent with the whole ladder wired in, against mock providers."""
+    """One agent with the whole ladder wired in.
 
-    def __init__(self) -> None:
+    With no client, the rungs are scripted -- the deterministic
+    drill, where the primary is taken offline on a fixed schedule.
+    With a client (an ``LLMClient``), the frontier and cheaper rungs
+    are real model calls (``LiveRung``): the outage is still injected
+    on a fixed schedule, because that is the failure being studied,
+    but the rung that serves the request is a real model, and the
+    cost reported is real provider-reported dollars.
+    """
+
+    def __init__(self, client=None) -> None:
+        self.client = client
         self.clock = FakeClock()
         self.breakers = {
             "frontier": CircuitBreaker(failure_threshold=3, reset_timeout_s=30.0,
@@ -40,6 +61,27 @@ class DegradedAgent:
         self.budgets = Budgets(per_run=10_000.0)  # generous: the drill tests routing, not spend
         self.queue = OfflineQueue()
         self.log: list[dict] = []
+        self.spent_usd: float = 0.0  # real money, live rungs only
+
+    def _rungs(self, *, frontier_down: bool):
+        """The ladder for one request: live rungs when a client is set."""
+        if self.client is None:
+            return [
+                Rung("frontier", 10, [503] if frontier_down else []),
+                Rung("cheaper-same-provider", 2, []),
+                Rung("different-provider", 8, []),
+            ]
+        frontier = (Rung("frontier", 10, [503]) if frontier_down
+                    else LiveRung("frontier", self.client, self.client.model))
+        return [
+            frontier,
+            LiveRung("cheaper-same-provider", self.client,
+                     self.client.judge_model),
+            # No second provider on this backend: this rung stays
+            # scripted even in the live drill, and is only reached if
+            # the live cheap rung fails.
+            Rung("different-provider", 8, []),
+        ]
 
     def answer(self, prompt: str, *, frontier_down: bool) -> dict:
         """Serve one request, logging which rung served it and why.
@@ -51,11 +93,7 @@ class DegradedAgent:
         """
         started = time.monotonic()
         cascade = ModelCascade(
-            [
-                Rung("frontier", 10, [503] if frontier_down else []),
-                Rung("cheaper-same-provider", 2, []),
-                Rung("different-provider", 8, []),
-            ],
+            self._rungs(frontier_down=frontier_down),
             cache={"What is the refund policy?": "[cached] Refunds within 30 days."},
             breakers=self.breakers,
         )
@@ -68,9 +106,11 @@ class DegradedAgent:
             raise
         latency_ms = (time.monotonic() - started) * 1000
         self.meter.spent += result.total_cost_units
+        self.spent_usd += result.total_cost_usd
         self.log.append({"prompt": prompt, "served_by": result.served_by,
                          "cause": "; ".join(result.attempts),
                          "cost": result.total_cost_units,
+                         "cost_usd": round(result.total_cost_usd, 4),
                          "latency_ms": round(latency_ms, 1)})
         if result.served_by == "refusal":
             # A task that can wait goes to the queue instead of dying.
@@ -84,6 +124,34 @@ def _p95(values: list[float]) -> float:
         return 0.0
     ordered = sorted(values)
     return ordered[max(0, int(0.95 * len(ordered)) - 1)]
+
+
+def live_drill(client) -> None:
+    """The same ladder, with real models on the serving rungs: two requests.
+
+    First the primary healthy, served by the real frontier model;
+    then the primary injected offline, served by the real cheap
+    model after the scripted 503. Two live calls. The different-
+    provider rung is not reached and stays scripted: there is no
+    second provider on this backend.
+    """
+    agent = DegradedAgent(client=client)
+    healthy = agent.answer(
+        "What is the refund policy? Answer in one sentence.",
+        frontier_down=False)
+    print(f"live: primary healthy -> served by {healthy['served_by']}: "
+          f"{healthy['answer'].strip()[:120]!r}")
+    down = agent.answer(
+        "What is the refund policy? Answer in one sentence.",
+        frontier_down=True)
+    print(f"live: primary offline -> served by {down['served_by']}: "
+          f"{down['answer'].strip()[:120]!r}")
+    for entry in agent.log:
+        print(f"live:   {entry['served_by']:24} cost ${entry['cost_usd']:.4f}  "
+              f"{entry['cause']}")
+    print(f"live: real cost for the drill: ${agent.spent_usd:.4f}; "
+          f"client totals: {client.total_prompt_tokens} prompt + "
+          f"{client.total_completion_tokens} completion tokens")
 
 
 def drill() -> None:
@@ -138,3 +206,14 @@ def drill() -> None:
 
 if __name__ == "__main__":
     drill()
+    print("\n--- live check: the ladder with real models on the serving rungs ---")
+    try:
+        from llm_client import LLMClient
+
+        if LLMClient.has_backend():
+            live_drill(LLMClient())
+        else:
+            print("live check skipped: no model backend configured "
+                  "(set LLM_API_KEY, or LLM_BACKEND=opencheap-connector)")
+    except Exception as exc:  # noqa: BLE001 - the live check must not hide the drill
+        print(f"live check failed: {exc}")

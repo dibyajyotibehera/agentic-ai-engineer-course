@@ -4,11 +4,20 @@
 # store is SQLite, the webhook endpoint is http.server, and the
 # Slack/Teams gates render JSON without any chat account.
 #
+# The plan step is a real model call, so the agent run and the demo
+# need a configured model backend: set LLM_API_KEY (with
+# LLM_BASE_URL and LLM_MODEL as needed) or run with
+# LLM_BACKEND=opencheap-connector on a machine where the OpenCheap
+# connector is registered. Without a backend the run fails loudly
+# instead of planning from a template — this chapter has no mock
+# model. The deterministic tests need no backend.
+#
 # Optional, for the LangGraph mapping in the lesson text only:
 #   pip install langgraph
 # The chapter code does not import LangGraph; the interrupt,
 # checkpointer and Command pattern it teaches is implemented here
 # in framework-neutral Python so the pause, routing and audit
-# behaviour can be run and tested with no model and no API key.
+# behaviour can be run and tested — the pause, routing and audit
+# parts with no model, the plan step against a real one.
 
 # (no dependencies)

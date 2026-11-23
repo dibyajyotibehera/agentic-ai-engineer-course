@@ -1,6 +1,12 @@
 # Chapter 5 has no third-party dependencies: the code runs on the Python
-# standard library only (Python 3.11 or later). No model API key and no
-# paid service is needed; the workers are deterministic stubs.
+# standard library only (Python 3.11 or later). The deterministic demos
+# and tests need no model API key and no paid service; the live demo
+# (demo_live_swarm.py) and the live tests need a configured model backend
+# (LLM_API_KEY, or LLM_BACKEND=opencheap-connector where the OpenCheap
+# connector is registered). The researcher and policy checker are
+# deterministic on purpose — the topology is the lesson — while the
+# sentiment scorer and the drafter have real model-backed versions
+# (see code/README.md).
 #
 # Optional, for the production mapping discussed in the README:
 #   pydantic>=2.0   # typed payloads as validated models instead of
