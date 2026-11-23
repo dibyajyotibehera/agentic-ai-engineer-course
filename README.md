@@ -4,7 +4,7 @@ A hands-on course for building production-grade AI agents, in the style of [the 
 
 ## Who this course is for
 
-You have shipped an agent to production, or you are about to. You know what a tool call is, you have watched an agent loop go wrong at 2 a.m., and you want the engineering judgement behind the patterns: when a directed acyclic graph beats a free-form loop, how to scope a tool so it cannot hurt you, what a memory layer costs you per task, and how to prove in continuous integration that a prompt change did not make things worse. If you are starting from zero, work through the [LLM course](https://github.com/mlabonne/llm-course) first — this course assumes its Agents, Evaluation, Deployment and Securing LLMs sections as background.
+You have shipped an agent to production, or you are about to. You know what a tool call is, you have watched an agent loop go wrong at 2 a.m., and you want the engineering judgement behind the patterns: when a directed acyclic graph beats a free-form loop, how to scope a tool so it cannot hurt you, what a memory layer costs you per task, and how to prove with the test suite that a prompt change did not make things worse. If you are starting from zero, work through the [LLM course](https://github.com/mlabonne/llm-course) first — this course assumes its Agents, Evaluation, Deployment and Securing LLMs sections as background.
 
 ## How the course is structured
 
