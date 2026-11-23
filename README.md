@@ -1,7 +1,5 @@
 # Agentic AI Engineer Course
 
-[![Checks](https://github.com/dibyajyotibehera/agentic-ai-engineer-course/actions/workflows/ci.yml/badge.svg)](https://github.com/dibyajyotibehera/agentic-ai-engineer-course/actions/workflows/ci.yml)
-
 A hands-on course for building production-grade AI agents, in the style of [the LLM course](https://github.com/mlabonne/llm-course): each chapter is a lesson with theory, runnable code, exercises and references. It is written for an advanced practitioner — an experienced engineer with production agentic-AI experience — not a beginner.
 
 ## Who this course is for
