@@ -3,8 +3,10 @@
 # faithfulness arithmetic) runs on the Python standard library only,
 # so it works in any CI runner with nothing to install. The live
 # path (LLMJudge, LLMClaimChecker, demo_live.py) needs a configured
-# model backend — LLM_API_KEY, or LLM_BACKEND=opencheap-connector
-# where the OpenCheap connector is registered — but no new package.
+# model backend — key-based (LLM_API_KEY, LLM_BASE_URL and LLM_MODEL)
+# or AWS Bedrock (LLM_BACKEND=bedrock and LLM_BEDROCK_MODEL_ID); see
+# "Connect a model" in the root README. The key-based path needs no
+# new package; the Bedrock path needs boto3: pip install boto3.
 #
 # Optional, for the real HHEM classifier stub in faithfulness.py:
 # transformers

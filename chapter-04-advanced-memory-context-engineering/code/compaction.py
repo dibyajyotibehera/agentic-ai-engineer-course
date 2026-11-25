@@ -35,9 +35,10 @@ of :func:`prune_tool_result` are deterministic and offline: they keep
 verbatim turns and reduce the rest to a head excerpt, which is
 labelled as an excerpt, not a summary. :func:`compact_with_llm` and
 :func:`prune_tool_result_with_llm` call a real model through
-``llm_summariser.py`` (cheap judge route, temperature zero, small
-``max_tokens``) and need a configured model backend
-(``LLM_API_KEY`` or ``LLM_BACKEND=opencheap-connector``). Run the
+``llm_summariser.py`` (judge model, temperature zero, small
+``max_tokens``) and need a connected model (key-based, the default,
+or ``LLM_BACKEND=bedrock`` — see "Connect a model" in the root
+README). Run the
 live paths with ``python compaction.py --live``.
 
 No API key and no paid service are needed to run the deterministic

@@ -19,9 +19,7 @@ spending real money, so the meter and budget are separable from the
 provider by design, and the fixed-count model is the injectable
 stand-in the lesson prescribes for that test. The live check at the
 end of this file (``live_demo``) instead drives the same meter with
-real token counts from real model calls, and needs a configured
-model backend (``LLM_BACKEND=opencheap-connector`` on the author's
-machine, or ``LLM_API_KEY``); it is skipped with a note when no
+real token counts from real model calls, and needs a configured model backend (see "Connect a model" in the root README -- key-based or AWS Bedrock); it is skipped with a note when no
 backend is configured.
 Run:  python cost_kill_switch.py
 """
@@ -123,7 +121,7 @@ class MockModel:
 class LiveModel:
     """A real model behind the same ``complete`` interface as ``MockModel``.
 
-    Each call is a real call on the cheap (``:floor``) route, and the
+    Each call is a real call on the judge model, and the
     token counts returned are the provider-reported counts for that
     call, read off the client's usage totals -- so the meter records
     real spend, and the kill-switch trips on real money, not on a
@@ -227,7 +225,7 @@ def live_demo() -> None:
     The meter records what the provider actually reported for each
     call, and the provider-reported dollar cost is printed alongside
     the abstract-unit tally, so the two accountings can be compared.
-    Two live calls on the cheap route.
+    Two live calls on the judge model.
     """
     from llm_client import LLMClient
 
@@ -278,6 +276,7 @@ if __name__ == "__main__":
             live_demo()
         else:
             print("live check skipped: no model backend configured "
-                  "(set LLM_API_KEY, or LLM_BACKEND=opencheap-connector)")
+                  "(connect a model: LLM_API_KEY, LLM_BASE_URL and LLM_MODEL, "
+                  "or LLM_BACKEND=bedrock with LLM_BEDROCK_MODEL_ID)")
     except Exception as exc:  # noqa: BLE001 - the live check must not hide the demo
         print(f"live check failed: {exc}")

@@ -1,16 +1,17 @@
 # Chapter 8 — Human-in-the-Loop & Breakpoints
 #
-# Standard library only. There is nothing to install: the durable
-# store is SQLite, the webhook endpoint is http.server, and the
-# Slack/Teams gates render JSON without any chat account.
+# Standard library only for the key-based backend. There is nothing
+# to install: the durable store is SQLite, the webhook endpoint is
+# http.server, and the Slack/Teams gates render JSON without any
+# chat account. The AWS Bedrock backend needs `pip install boto3`.
 #
 # The plan step is a real model call, so the agent run and the demo
-# need a configured model backend: set LLM_API_KEY (with
-# LLM_BASE_URL and LLM_MODEL as needed) or run with
-# LLM_BACKEND=opencheap-connector on a machine where the OpenCheap
-# connector is registered. Without a backend the run fails loudly
-# instead of planning from a template — this chapter has no mock
-# model. The deterministic tests need no backend.
+# need a connected model: key-based, set LLM_API_KEY, LLM_BASE_URL
+# and LLM_MODEL — or use AWS Bedrock with LLM_BACKEND=bedrock and
+# LLM_BEDROCK_MODEL_ID set. See "Connect a model" in the root
+# README. Without a backend the run fails loudly instead of
+# planning from a template — this chapter has no mock model. The
+# deterministic tests need no backend.
 #
 # Optional, for the LangGraph mapping in the lesson text only:
 #   pip install langgraph

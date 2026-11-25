@@ -28,8 +28,10 @@ every run. Pass ``--live`` and the simulator calls a real model for the
 draft and the review instead, recording the results in the event log;
 run it a second time and the recorded results are replayed with no new
 model calls at all, which is exactly the property Temporal sells. The
-``--live`` run needs a configured model backend (``LLM_API_KEY`` or
-``LLM_BACKEND=opencheap-connector``). The real worker path always uses
+``--live`` run needs a configured model backend — key-based with
+``LLM_API_KEY``, ``LLM_BASE_URL`` and ``LLM_MODEL``, or AWS Bedrock
+with ``LLM_BACKEND=bedrock``; see "Connect a model" in the root
+README. The real worker path always uses
 the real model and fails loudly at startup if no backend is configured,
 because a worker that silently fell back to template drafts would be
 pretending to do the job.
@@ -401,8 +403,8 @@ def main(argv: list[str] | None = None) -> int:
                        help="replay the durable-execution model from a JSON log")
     p.add_argument("--live", action="store_true",
                    help="use a real model for drafting and reviewing "
-                        "(needs LLM_API_KEY or "
-                        "LLM_BACKEND=opencheap-connector)")
+                        "(needs a configured model backend; see "
+                        "\"Connect a model\" in the root README)")
     sub.add_parser("worker", help="run a real Temporal worker (needs server)")
     p = sub.add_parser("start", help="start a real workflow (needs server)")
     p.add_argument("--ticket", default="T-102")

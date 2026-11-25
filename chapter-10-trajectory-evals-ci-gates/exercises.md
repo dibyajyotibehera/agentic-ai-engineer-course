@@ -3,9 +3,10 @@
 Work in `code/`. Everything except the live judge and claim checker
 runs on the standard library, with no network and no API key. The
 live path — `LLMJudge`, `LLMClaimChecker`, and `demo_live.py` —
-needs a configured model backend: your own key (`LLM_API_KEY`) or
-`LLM_BACKEND=opencheap-connector` on a machine where the OpenCheap
-connector is registered. Run the tests first so you know what the
+needs a connected model: key-based (any OpenAI-compatible API, with
+`LLM_API_KEY`, `LLM_BASE_URL` and `LLM_MODEL` set) or AWS Bedrock
+(`LLM_BACKEND=bedrock` with `LLM_BEDROCK_MODEL_ID` set) — see
+"Connect a model" in the root README. Run the tests first so you know what the
 finished pieces promise:
 
 ```bash

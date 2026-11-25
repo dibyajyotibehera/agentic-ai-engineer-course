@@ -9,8 +9,9 @@ is why they live here instead of being copied into each demo:
 * ``draft_reply`` — write the reply to a customer. Agent work, so it runs
   on the client's default model.
 * ``review_draft`` — judge whether a draft is good enough to send. A
-  short classification, so it runs on the cheap judge route
-  (``kimi-k3.1-pro:floor``) with a small token budget.
+  short classification, so it runs on the configured judge model
+  (``LLM_JUDGE_MODEL``, defaulting to the main model) with a small
+  token budget.
 * ``decide_next_step`` — the free-form loop's next-step decision, also a
   short classification on the judge route.
 

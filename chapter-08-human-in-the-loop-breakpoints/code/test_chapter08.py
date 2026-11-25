@@ -19,9 +19,10 @@ lives in this file only and never ships as production code; the
 production plan step is a real model call (see the live tests).
 
 The live tests at the end need a configured model backend
-(``LLM_API_KEY`` or ``LLM_BACKEND=opencheap-connector``). When no
-backend is configured they skip instead of failing: a skipped live
-test means "not run", not "passed".
+(key-based — ``LLM_API_KEY``, ``LLM_BASE_URL`` and ``LLM_MODEL`` —
+or ``LLM_BACKEND=bedrock``). When no backend is configured they
+skip instead of failing: a skipped live test means "not run", not
+"passed".
 """
 
 from __future__ import annotations

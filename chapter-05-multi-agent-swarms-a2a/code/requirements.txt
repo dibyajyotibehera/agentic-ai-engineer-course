@@ -2,8 +2,10 @@
 # standard library only (Python 3.11 or later). The deterministic demos
 # and tests need no model API key and no paid service; the live demo
 # (demo_live_swarm.py) and the live tests need a configured model backend
-# (LLM_API_KEY, or LLM_BACKEND=opencheap-connector where the OpenCheap
-# connector is registered). The researcher and policy checker are
+# (LLM_API_KEY, LLM_BASE_URL and LLM_MODEL for the key-based path,
+# or LLM_BACKEND=bedrock with LLM_BEDROCK_MODEL_ID for AWS Bedrock —
+# see the root README's "Connect a model" section). The Bedrock path
+# needs the AWS SDK: pip install boto3. The researcher and policy checker are
 # deterministic on purpose — the topology is the lesson — while the
 # sentiment scorer and the drafter have real model-backed versions
 # (see code/README.md).

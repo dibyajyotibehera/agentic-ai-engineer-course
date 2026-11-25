@@ -11,8 +11,8 @@ The loop has three steps, and the checkpoint is written to SQLite
 1. ``plan`` — a real model call (see ``plan_write`` and
    ``llm_client.py``, copied from Chapter 7) drafts the proposed
    write as structured JSON. It needs a configured model backend
-   (``LLM_API_KEY`` or ``LLM_BACKEND=opencheap-connector``); without
-   one the run fails loudly instead of planning from a template,
+   (key-based — ``LLM_API_KEY``, ``LLM_BASE_URL`` and ``LLM_MODEL``
+   — or ``LLM_BACKEND=bedrock``); without one the run fails loudly
    because a template is a mock of the model and this chapter has
    no mock models left. The deterministic tests inject a trivial
    planner through ``run_agent``'s ``planner`` argument instead —
@@ -156,9 +156,9 @@ def plan_write(task: str, client: LLMClient) -> dict:
 
     The model returns structured JSON with two fields: ``path``, the
     filename to write under ``out/``, and ``content``, the Markdown
-    to write there. The cheap judge route (``:floor``) is used,
-    because drafting a short file is a small job, not a reasoning
-    task — but the token budget is kept generous, because a model
+    to write there. The configured judge model (``LLM_JUDGE_MODEL``,
+    defaulting to the main model) is used, because drafting a short
+    file is a small job, not a reasoning task — but the token budget
     given too small a budget can spend it all on hidden reasoning
     and return empty content (the same gotcha Chapter 7's demo
     documents). If the model still returns an unusable reply, the
@@ -422,7 +422,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db", default=str(store.default_db_path()),
                         help="SQLite store path (default: code/hitl.db)")
     parser.add_argument("--backend", default=None,
-                        help="LLM backend: env (default) or opencheap-connector")
+                        help="LLM backend: env (default) or bedrock")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_run = sub.add_parser("run", help="Plan a task, then pause for approval")
@@ -458,9 +458,10 @@ def main(argv: list[str] | None = None) -> int:
                                timeout_seconds=args.timeout_seconds)
         except LLMError as error:
             print(f"Cannot plan the run: {error}", file=sys.stderr)
-            print("Set LLM_API_KEY (and optionally LLM_BASE_URL and "
-                  "LLM_MODEL), or run with --backend "
-                  "opencheap-connector.", file=sys.stderr)
+            print("Set LLM_API_KEY, LLM_BASE_URL and LLM_MODEL, "
+                  "or run with --backend bedrock and LLM_BEDROCK_MODEL_ID "
+                  "set (see \"Connect a model\" in the root README).",
+                  file=sys.stderr)
             return 2
         print(json.dumps(result, indent=2))
         usage = result.get("model_usage")

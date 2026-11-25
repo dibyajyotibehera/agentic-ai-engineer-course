@@ -27,9 +27,10 @@ the live tiers below are what replace the stand-in with a real
 model: ``LiveTier`` calls the model for real, and
 ``answer_routed`` routes a task with the same router and then
 answers it on the routed tier, reporting the provider's real token
-counts and real dollar cost. The backend exposes only two routes of
-one model (the full model and its ``:floor`` cheap route), so the
-live pool has two tiers -- small (``:floor``) and frontier (full) --
+counts and real dollar cost. The configured backend exposes two models -- the configured model
+and the judge model (``LLM_JUDGE_MODEL``, which defaults to the
+configured model) -- so the live pool has two tiers -- small (judge)
+and frontier (configured) --
 and a task the simulated pool would route to mid is served live by
 the cheap tier, which the live demo says plainly when it happens.
 
@@ -41,9 +42,7 @@ scores are likewise scripted stand-ins, not measured results.
 
 No API key is needed for the deterministic demo: every model in the
 simulated pool is a worked example. The live section at the end of
-the demo answers two routed tasks with the real model, and needs a
-configured model backend (``LLM_BACKEND=opencheap-connector`` on
-the author's machine, or ``LLM_API_KEY``); it is skipped with a
+the demo answers two routed tasks with the real model, and needs a configured model backend (see "Connect a model" in the root README -- key-based or AWS Bedrock); it is skipped with a
 note when no backend is configured.
 Run:  python cascade_router.py
 Test: python test_cascade_router.py
@@ -387,8 +386,8 @@ class LiveTier:
 
     ``name`` is the tier name in the simulated pool (``"small"`` or
     ``"frontier"``); ``model_id`` is the route on the configured
-    backend. The cheap tier is the ``:floor`` route of the same
-    model, the frontier tier is the default model. ``complete``
+    backend. The cheap tier is the judge model, the frontier tier is
+    the configured model. ``complete``
     returns the model's real answer plus the provider-reported
     token counts and dollar cost for that call, read off the
     client's usage totals. ``max_tokens`` is generous (1500) because
@@ -430,7 +429,8 @@ def live_tiers(client) -> dict[str, LiveTier]:
     }
 
 
-# The simulated pool has a mid tier the backend has no route for, so
+# The simulated pool has a mid tier the configured backend has no
+# separate model for, so
 # a live answer routed to mid is served by the cheap tier instead.
 # That collapse is the honest mapping on this backend, and it is
 # reported in the result rather than hidden.
@@ -487,7 +487,7 @@ def live_demo() -> None:
              "bullet points.", "plan"),
     ]:
         result = answer_routed(task, client, tiers=tiers)
-        note = (" (mid has no live route; served by the cheap tier)"
+        note = (" (mid has no live tier; served by the cheap tier)"
                 if result["collapsed_mid_to_small"] else "")
         print(f"live: {task.task_type} task routed to "
               f"{result['routed_model']} -> served by "
@@ -568,6 +568,7 @@ if __name__ == "__main__":
             live_demo()
         else:
             print("live check skipped: no model backend configured "
-                  "(set LLM_API_KEY, or LLM_BACKEND=opencheap-connector)")
+                  "(connect a model: LLM_API_KEY, LLM_BASE_URL and LLM_MODEL, "
+                  "or LLM_BACKEND=bedrock with LLM_BEDROCK_MODEL_ID)")
     except Exception as exc:  # noqa: BLE001 - the live check must not hide the demo
         print(f"live check failed: {exc}")

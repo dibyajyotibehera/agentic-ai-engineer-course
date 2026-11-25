@@ -8,7 +8,8 @@ all pure local computation, and the chapter scripts are exercised
 end to end in their mock / synthetic modes.
 
 The live tests at the end need a configured model backend
-(``LLM_API_KEY`` or ``LLM_BACKEND=opencheap-connector``). When no
+(``LLM_API_KEY``, ``LLM_BASE_URL`` and ``LLM_MODEL`` set, or
+``LLM_BACKEND=bedrock`` with ``LLM_BEDROCK_MODEL_ID``). When no
 backend is configured they skip instead of failing: a skipped live
 test means "not run", not "passed". The live tests call the real
 vision model against real image files rendered here with Pillow —

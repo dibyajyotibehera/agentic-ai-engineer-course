@@ -33,7 +33,9 @@ The seam is a state handoff with a failure policy, both implemented here:
 Run:
     pip install -r requirements.txt
     playwright install chromium
-    LLM_BACKEND=opencheap-connector python 05_hybrid_seam.py [--self-test]
+    LLM_API_KEY=<redacted> LLM_BASE_URL=<your provider's API base URL> LLM_MODEL=<your model name> python 05_hybrid_seam.py [--self-test]
+    # ... or with AWS Bedrock:
+    LLM_BACKEND=bedrock LLM_BEDROCK_MODEL_ID=<your inference profile ID> python 05_hybrid_seam.py [--self-test]
 
 --self-test exercises the failure policy and the mark allow-list without a
 browser, so the seam logic is verifiable even where Playwright is not
@@ -205,11 +207,11 @@ def main() -> int:
         if LLMClient.has_backend():
             client = LLMClient()
             print(f"Delegated step uses the real vision model "
-                  f"(route {client.judge_model}).")
+                  f"(model {client.judge_model}).")
         else:
             print("No model backend configured; the delegated step uses "
-                  "the deterministic label-matching chooser. Run with "
-                  "LLM_BACKEND=opencheap-connector or LLM_API_KEY set "
+                  "the deterministic label-matching chooser. Connect a "
+                  "model (see \"Connect a model\" in the root README) "
                   "for the real-model delegation.")
 
     try:

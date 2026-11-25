@@ -4,8 +4,10 @@
 
 from inside the code/ directory. The deterministic tests need no
 network, no model, and no API key. The live tests at the end need a
-configured model backend (``LLM_API_KEY`` or
-``LLM_BACKEND=opencheap-connector``) and skip when there is none: a
+configured model backend (key-based: ``LLM_API_KEY``,
+``LLM_BASE_URL`` and ``LLM_MODEL``; or AWS Bedrock:
+``LLM_BACKEND=bedrock`` and ``LLM_BEDROCK_MODEL_ID`` — see
+"Connect a model" in the root README) and skip when there is none: a
 skipped live test means "not run", not "passed".
 """
 

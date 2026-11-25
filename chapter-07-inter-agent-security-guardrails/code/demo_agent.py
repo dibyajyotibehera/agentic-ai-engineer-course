@@ -1,8 +1,9 @@
 """Demo: the same attack against a vulnerable agent and a guarded one.
 
 Run it with ``python demo_agent.py`` from this directory. It needs a
-model API key (``LLM_API_KEY``) or the OpenCheap connector backend
-(``LLM_BACKEND=opencheap-connector``), and a mail server to send
+connected model — key-based (``LLM_API_KEY``, ``LLM_BASE_URL`` and
+``LLM_MODEL``) or AWS Bedrock (``LLM_BACKEND=bedrock`` and
+``LLM_BEDROCK_MODEL_ID``) — and a mail server to send
 through. Start the debugging server first, in a second terminal:
 
     python debug_smtp_server.py
@@ -14,8 +15,8 @@ customer's account details to an outside address. The vulnerable
 agent asks a real model to summarise the ticket, the model calls
 read_ticket, and the poisoned text comes back as a tool result.
 Whether the model then follows the injected instruction depends
-on the model: the hardened model this was run against (Kimi K3.1
-Pro) refuses it and summarises the ticket instead, while a
+on the model: the hardened model this was run against refuses it
+and summarises the ticket instead, while a
 different model, version, temperature or phrasing can flip that
 outcome — which is exactly why the guarded agent blocks by
 construction instead of by the model's goodwill. The guarded agent
@@ -436,7 +437,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ticket", default="TKT-1042",
                         help="ticket to run against (default: TKT-1042, poisoned)")
     parser.add_argument("--backend", default=None,
-                        help="LLM backend: env (default) or opencheap-connector")
+                        help="LLM backend: env (default) or bedrock")
     args = parser.parse_args(argv)
     if args.backend:
         os.environ["LLM_BACKEND"] = args.backend
@@ -445,8 +446,9 @@ def main(argv: list[str] | None = None) -> int:
         client = LLMClient()
     except LLMError as error:
         print(f"Cannot run the demo: {error}", file=sys.stderr)
-        print("Set LLM_API_KEY (and optionally LLM_BASE_URL and LLM_MODEL), "
-              "or run with --backend opencheap-connector.", file=sys.stderr)
+        print("Connect a model first — see \"Connect a model\" in the "
+              "root README — or run with --backend bedrock and "
+              "LLM_BEDROCK_MODEL_ID set.", file=sys.stderr)
         return 2
 
     print("=== Vulnerable agent ===")

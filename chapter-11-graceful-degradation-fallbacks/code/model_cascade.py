@@ -28,9 +28,7 @@ never mixed.
 No API key is needed for the deterministic demo: the scripted rungs
 fail on a fixed schedule, which is the failure injection the ladder
 is studied with. The live section at the end of the demo calls the
-real model once, and needs a configured model backend
-(``LLM_BACKEND=opencheap-connector`` on the author's machine, or
-``LLM_API_KEY``); it is skipped with a note when no backend is
+real model once, and needs a configured model backend (see "Connect a model" in the root README -- key-based or AWS Bedrock); it is skipped with a note when no backend is
 configured.
 Run:  python model_cascade.py
 """
@@ -83,8 +81,9 @@ class LiveRung:
     provider-reported cost from the client's usage totals, and
     ``cost_units`` stays 0 so abstract units and real dollars are
     never added together. ``model_id`` is a route on the configured
-    backend -- the cheap tier is the ``:floor`` route of the same
-    model, the frontier tier is the default model. ``max_tokens``
+    backend -- the cheap tier is the judge model (``LLM_JUDGE_MODEL``,
+    which defaults to the configured model), the frontier tier is the
+    configured model. ``max_tokens``
     is generous (1500) because this model spends a large share of a
     small budget on hidden reasoning and can return empty content
     if the budget is too tight.
@@ -209,7 +208,7 @@ def live_demo() -> None:
 
     The frontier rung fails with a scripted 503 -- the failure
     injection, which is deterministic by design -- and the cheap rung
-    is a real model call on the ``:floor`` route, so the answer served
+    is a real model call on the judge model, so the answer served
     is a real answer and the cost reported is real provider-reported
     dollars. One live call.
     """
@@ -282,6 +281,7 @@ if __name__ == "__main__":
             live_demo()
         else:
             print("live check skipped: no model backend configured "
-                  "(set LLM_API_KEY, or LLM_BACKEND=opencheap-connector)")
+                  "(connect a model: LLM_API_KEY, LLM_BASE_URL and LLM_MODEL, "
+                  "or LLM_BACKEND=bedrock with LLM_BEDROCK_MODEL_ID)")
     except Exception as exc:  # noqa: BLE001 - the live check must not hide the demo
         print(f"live check failed: {exc}")

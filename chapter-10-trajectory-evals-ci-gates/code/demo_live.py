@@ -6,13 +6,17 @@ the same verdict on the same code twice, and a model judge does not.
 This script shows what the model layer actually does, on one real
 trajectory and one real faithfulness check, and reports what it cost.
 
-Run from this directory with a configured model backend:
+Run from this directory with a connected model — see "Connect a
+model" in the root README — key-based:
 
-    LLM_BACKEND=opencheap-connector python demo_live.py
+    LLM_API_KEY=<redacted> LLM_BASE_URL=<your provider's API base URL> LLM_MODEL=<your model name> python demo_live.py
 
-Students use their own key instead: ``LLM_API_KEY=... python
-demo_live.py``. The client is shared with Chapter 7
-(``llm_client.py``), so the configuration is the same.
+or with AWS Bedrock:
+
+    LLM_BACKEND=bedrock LLM_BEDROCK_MODEL_ID=<your inference profile ID> python demo_live.py
+
+The client is shared with Chapter 7 (``llm_client.py``), so the
+configuration is the same.
 """
 
 from __future__ import annotations

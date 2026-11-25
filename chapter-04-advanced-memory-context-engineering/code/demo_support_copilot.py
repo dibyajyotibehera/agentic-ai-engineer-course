@@ -11,7 +11,9 @@ three-tier store (``memory_store.py``) and the token budget
 Run it with:  python demo_support_copilot.py
 Run the checks with:  python -m py_compile memory_store.py token_budget.py demo_support_copilot.py
 Run the live paths (real model compaction and tool-result summary)
-with:  LLM_BACKEND=opencheap-connector python demo_support_copilot.py --live
+with a model connected — see "Connect a model" in the root README —
+with:  python demo_support_copilot.py --live
+(or:  LLM_BACKEND=bedrock python demo_support_copilot.py --live)
 """
 
 from __future__ import annotations
@@ -116,8 +118,9 @@ def main() -> None:
 def run_live(store: MemoryStore) -> None:
     """Live section: real model compaction and tool-result summary.
 
-    Needs a configured model backend (``LLM_API_KEY`` or
-    ``LLM_BACKEND=opencheap-connector``). The transcript is the
+    Needs a connected model (key-based, the default, or
+    ``LLM_BACKEND=bedrock`` — see "Connect a model" in the root
+    README). The transcript is the
     working tier of the Acme session above, compacted by a real
     model call; the billing record is summarised by a real model
     call. Prints the model's token usage and cost for the run.

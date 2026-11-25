@@ -533,8 +533,9 @@ gate so costly that nobody runs it.
 Start in `code/`: run `python ci_gate.py` and watch the gate fail
 on the critical ordering case, then run `python -m unittest
 test_trajectory -v` and read the tests, because the tests are the
-specification of what each piece promises. Then run the live path,
-`LLM_BACKEND=opencheap-connector python demo_live.py`, and watch
+specification of what each piece promises. Then run the live path, with a model connected as described in
+"Connect a model" in the root README — key-based with
+`LLM_API_KEY=<redacted> LLM_BASE_URL=<your provider's API base URL> LLM_MODEL=<your model name> python demo_live.py`, or with AWS Bedrock using `LLM_BACKEND=bedrock LLM_BEDROCK_MODEL_ID=<your inference profile ID> python demo_live.py` — and watch
 the real judge pass the golden run and fail the ordering-error run.
 Then work through `exercises.md`, which builds the grader, the
 golden DAG, the distance metric, and the gate in that order, and ends

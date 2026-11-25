@@ -11,17 +11,18 @@ The profiler is framework-neutral: wrap any callable step with
 ``profile()`` or decorate it with ``@span``. The demo profiles the
 real copilot in ``copilot.py`` — a plan call and a draft call to a
 real model, four local tools fanning out in parallel, and a judge
-call on the cheap route — so it needs a model backend (``LLM_API_KEY``
-or ``LLM_BACKEND=opencheap-connector``) and it reports real numbers:
-the run total is wall-clock time, and the parallel fan-out costs the
-slowest member, not the sum, because the tools really run
-concurrently under a thread pool.
+call on the configured judge model — so it needs a model backend
+configured (see "Connect a model" in the root README) and it
+reports real numbers: the run total is wall-clock time, and the
+parallel fan-out costs the slowest member, not the sum, because the
+tools really run concurrently under a thread pool.
 
 Serving threshold from Chapter 11, used by the report: an alert fires
 when 95th-percentile latency rises above 2 seconds.
 
-Usage:
-    LLM_BACKEND=opencheap-connector python latency_profiler.py [--runs N] [--sequential]
+Usage (with a model backend configured):
+    LLM_API_KEY=<key> LLM_BASE_URL=<base URL> LLM_MODEL=<model> python latency_profiler.py [--runs N] [--sequential]
+    LLM_BACKEND=bedrock LLM_BEDROCK_MODEL_ID=<inference profile ID> python latency_profiler.py [--runs N] [--sequential]
 """
 
 from __future__ import annotations

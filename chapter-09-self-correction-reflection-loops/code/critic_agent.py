@@ -42,9 +42,10 @@ checking, and the test suite is the ground truth that decides
 whether the loop continues. The demo prints both verdicts side by
 side so the reader can see where they agree.
 
-Running the demo needs a configured model backend — ``LLM_API_KEY``
-(or ``LLM_BACKEND=opencheap-connector`` on the author's machine, as
-in Chapter 7). Without one it fails loudly instead of pretending
+Running the demo needs a configured model backend — key-based
+(``LLM_API_KEY``, ``LLM_BASE_URL`` and ``LLM_MODEL``) or AWS Bedrock
+(``LLM_BACKEND=bedrock`` with ``LLM_BEDROCK_MODEL_ID``); see the root
+README's "Connect a model" section. Without one it fails loudly instead of pretending
 with a scripted maker. The deterministic behaviour of the loop
 itself — rounds, stopping rules, escalation — is covered by the
 tests in ``test_critic_and_healing.py``, which drive the loop with a
@@ -428,8 +429,8 @@ def main() -> int:
         client = LLMClient()
     except LLMError as error:
         print(f"Cannot run the demo: {error}", file=sys.stderr)
-        print("Set LLM_API_KEY (and optionally LLM_BASE_URL and LLM_MODEL), "
-              "or run with LLM_BACKEND=opencheap-connector.", file=sys.stderr)
+        print("Set LLM_API_KEY, LLM_BASE_URL and LLM_MODEL (key-based), "
+              "or LLM_BACKEND=bedrock with LLM_BEDROCK_MODEL_ID.", file=sys.stderr)
         return 2
 
     maker = LLMMaker(client)

@@ -21,10 +21,10 @@ engine is the same job with the stand-ins removed. Pass ``--live`` to run
 the second engine: drafts are written by a real model, drafts are judged
 by a real model acting as reviewer (``live_review.py``), and in the
 free-form loop the next step is chosen by a real model at every step. The
-live run needs a configured model backend — ``LLM_API_KEY`` or
-``LLM_BACKEND=opencheap-connector`` on a machine where the OpenCheap
-connector is registered — and it prints the token and cost totals at the
-end. The outcomes are the same in both engines by design: the first draft
+live run needs a configured model backend — key-based with
+``LLM_API_KEY``, ``LLM_BASE_URL`` and ``LLM_MODEL``, or AWS Bedrock
+with ``LLM_BACKEND=bedrock``; see "Connect a model" in the root
+README — and it prints the token and cost totals at the end. The outcomes are the same in both engines by design: the first draft
 is a holding reply that fails review on substance, the second draft is
 substantive and passes, so the directed acyclic graph (DAG) still escalates
 the ticket that needs a second draft while the cyclic graph resolves it.
@@ -300,7 +300,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--live", action="store_true",
         help="use a real model for drafting, reviewing, and deciding "
-             "(needs LLM_API_KEY or LLM_BACKEND=opencheap-connector)")
+             "(needs a configured model backend; see \"Connect a model\" "
+             "in the root README)")
     args = parser.parse_args(argv)
     if args.live:
         from llm_client import LLMClient

@@ -10,10 +10,11 @@ where a head-truncation used to stand in for a summary:
 
 Both paths call a real model through ``llm_client.LLMClient``,
 following the same pattern as Chapter 7's ``injection_judge.py``:
-a cheap model, a fixed prompt, temperature zero, and a small
+the judge model, a fixed prompt, temperature zero, and a small
 ``max_tokens`` cap, because a summary is a short rewriting task,
 not a reasoning task. The summariser uses the judge model
-(``kimi-k3.1-pro:floor`` by default) for exactly that reason.
+(``LLM_JUDGE_MODEL``, which defaults to the configured model) for
+exactly that reason.
 
 Two guarantees the callers rely on, and that the summariser itself
 does not provide:
@@ -27,8 +28,9 @@ does not provide:
   falling back to a truncated head. A compaction that silently
   pretends is worse than one that fails loudly.
 
-Needs a configured model backend (``LLM_API_KEY`` or
-``LLM_BACKEND=opencheap-connector``). The deterministic, offline
+Needs a connected model (key-based, the default, or
+``LLM_BACKEND=bedrock`` — see "Connect a model" in the root README).
+The deterministic, offline
 paths in ``compaction.py`` and ``token_budget.py`` still work
 without one; they label their output as a head excerpt, not a
 summary.

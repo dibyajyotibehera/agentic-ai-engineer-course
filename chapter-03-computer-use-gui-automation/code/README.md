@@ -23,14 +23,16 @@ self-contained. Exercises 2 and 5 call a real vision model by
 default when a backend is configured:
 
 ```bash
-LLM_BACKEND=opencheap-connector python 02_set_of_mark.py
+LLM_API_KEY=<redacted> LLM_BASE_URL=<your provider's API base URL> LLM_MODEL=<your model name> python 02_set_of_mark.py
+# ... or with AWS Bedrock:
+LLM_BACKEND=bedrock LLM_BEDROCK_MODEL_ID=<your inference profile ID> python 02_set_of_mark.py
 ```
 
-That authenticates through the registered OpenCheap connector, so
-no key enters the process. With your own key instead, set
-`LLM_API_KEY` (and optionally `LLM_BASE_URL` / `LLM_MODEL`).
-Both model calls use the cheap route (`kimi-k3.1-pro:floor`) with a
-small token cap: a full Exercise 2 run measured 9,009 prompt +
+Connect a model first — see "Connect a model" in the root
+README for the two paths (key-based, or AWS Bedrock). Both model
+calls use the configured judge model (`LLM_JUDGE_MODEL`,
+defaulting to the main model) with a small token cap: a full
+Exercise 2 run measured 9,009 prompt +
 917 completion tokens, $0.0030. Never print or store a key; the
 client raises loudly when none is configured.
 

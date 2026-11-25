@@ -5,14 +5,15 @@ resolves a support ticket by fanning out to four local tools — account
 state, subscription status, knowledge-base search, and refund
 eligibility — then drafting a resolution with a real model call, and
 finally grading that resolution with a real language-model judge on
-the cheap route. Nothing here is simulated:
+the configured judge model. Nothing here is simulated:
 
 - The tools are real local execution: they read the ticket fixtures
   and the knowledge base defined below (plain Python data, no
   network, no sleep standing in for work) and return what they find.
 - The plan and the draft are real model calls through ``llm_client``.
-- The judge is a real structured model call on the cheap route
-  (``kimi-k3.1-pro:floor``), grading the draft against a rubric.
+- The judge is a real structured model call on the configured judge
+  model (``LLM_JUDGE_MODEL``, defaulting to the main model), grading
+  the draft against a rubric.
 - Token counts are measured, not invented: after every model call
   the client's running totals are differenced, so each call's
   prompt and completion tokens are the provider's own numbers.
@@ -25,9 +26,10 @@ share of the draft prompt's characters applied to the draft call's
 measured prompt tokens, because there is no local tokenizer to count
 it exactly. Everything else in a run is a measurement.
 
-Usage (from this directory, with a model backend configured)::
+Usage (from this directory, with a model backend configured — see
+"Connect a model" in the root README)::
 
-    LLM_BACKEND=opencheap-connector python -c "
+    LLM_API_KEY=<key> LLM_BASE_URL=<base URL> LLM_MODEL=<model> python -c "
     from llm_client import LLMClient, LLMError
     from copilot import TICKETS, run_copilot
     run = run_copilot(LLMClient(), TICKETS[0])
@@ -384,7 +386,7 @@ def run_copilot(
         draft_tokens[0] * len(memory_block) / max(1, len(draft_prompt))
     )
 
-    # Step 4 — judge: a real structured call on the cheap route.
+    # Step 4 — judge: a real structured call on the configured judge model.
     with span("judge: grade resolution"):
         before = _snapshot(client)
         verdict = client.structured(

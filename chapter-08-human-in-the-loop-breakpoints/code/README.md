@@ -1,20 +1,24 @@
 # Code for Chapter 8 — Human-in-the-Loop & Breakpoints
 
-Standard library only — nothing to install. The plan step is a real
-model call, so the agent run and the demo need a configured model
-backend: set `LLM_API_KEY` (with `LLM_BASE_URL` and `LLM_MODEL` as
-needed) or run with `LLM_BACKEND=opencheap-connector` on a machine
-where the OpenCheap connector is registered. Without a backend the
-run fails loudly instead of planning from a template — there is no
-mock model in this chapter. The deterministic tests need no backend:
-they inject a trivial planner fixture that lives in the test file.
+Standard library only — nothing to install for the key-based
+backend (the AWS Bedrock backend needs `pip install boto3`). The
+plan step is a real model call, so the agent run and the demo need
+a connected model — see "Connect a model" in the root README.
+Without a backend the run fails loudly instead of planning from a
+template — there is no mock model in this chapter. The
+deterministic tests need no backend: they inject a trivial planner
+fixture that lives in the test file.
 
 ## The flow
 
 ```bash
 # 1. The agent plans with the real model, then pauses durably
-#    before its write tool.
-LLM_BACKEND=opencheap-connector python durable_pause.py run \
+#    before its write tool. With a model connected (see above):
+python durable_pause.py run \
+    --task "Publish the weekly changelog"
+
+#    ... or with AWS Bedrock:
+LLM_BACKEND=bedrock LLM_BEDROCK_MODEL_ID=... python durable_pause.py run \
     --task "Publish the weekly changelog"
 
 # 2. (Optional) start the webhook approval endpoint in another shell.
@@ -35,7 +39,9 @@ python audit.py --db hitl.db --run-id <run-id>
 Or run the whole flow, including both chat-gate payloads, in one go:
 
 ```bash
-LLM_BACKEND=opencheap-connector python demo_end_to_end.py
+python demo_end_to_end.py
+# ... or with AWS Bedrock:
+LLM_BACKEND=bedrock LLM_BEDROCK_MODEL_ID=... python demo_end_to_end.py
 python -m unittest test_chapter08 -v
 ```
 

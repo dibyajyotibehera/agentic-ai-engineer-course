@@ -1,17 +1,21 @@
 """Demo: the same supervisor swarm, with real model-backed workers.
 
-Run from the chapter directory:
+Run from the chapter directory, with a model connected as described
+in the root README's "Connect a model" section — key-based:
 
-    LLM_BACKEND=opencheap-connector python code/demo_live_swarm.py
+    LLM_API_KEY=<redacted> LLM_BASE_URL=<your provider's API base URL> \
+        LLM_MODEL=<your model name> python code/demo_live_swarm.py
 
-(or set LLM_API_KEY, with LLM_BASE_URL and LLM_MODEL if your provider
-is not OpenCheap's router and Kimi K3.1 Pro).
+or AWS Bedrock:
+
+    LLM_BACKEND=bedrock LLM_BEDROCK_MODEL_ID=<inference profile ID> \
+        python code/demo_live_swarm.py
 
 This is the live version of ``demo_supervisor.py``: the researcher
 still reads the real ``accounts.json`` file and the policy checker
 still applies its written rule table, because those are deterministic
 jobs — but the sentiment scorer and the drafter are real model calls
-(``ModelSentimentWorker`` on the cheap ``:floor`` judge route, and
+(``ModelSentimentWorker`` on the judge model, and
 ``ModelDrafterWorker`` on the full model). The model never returns
 free text across a handoff: its structured JSON reply is parsed into
 the typed payload and validated, so a malformed reply is a rejection,
@@ -36,9 +40,11 @@ from swarm import (
 def main() -> None:
     if not LLMClient.has_backend():
         print(
-            "No model backend is configured. Set LLM_API_KEY, or run "
-            "with LLM_BACKEND=opencheap-connector on a machine where "
-            "the OpenCheap connector is registered.",
+            "No model backend is configured. Set LLM_API_KEY, "
+            "LLM_BASE_URL and LLM_MODEL (key-based), or "
+            "LLM_BACKEND=bedrock with LLM_BEDROCK_MODEL_ID "
+            "(AWS Bedrock) — see the root README's 'Connect a model' "
+            "section.",
             file=sys.stderr,
         )
         raise SystemExit(2)

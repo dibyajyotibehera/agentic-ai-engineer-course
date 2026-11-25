@@ -2,12 +2,12 @@
 
 Runs the whole chapter flow against a real model::
 
-    LLM_BACKEND=opencheap-connector python demo_end_to_end.py
+    python demo_end_to_end.py
 
-(or set ``LLM_API_KEY`` instead — see ``llm_client.py``). Without a
-configured backend it fails loudly with the setup steps, because
-the plan step is a real model call now and there is no template to
-fall back to.
+(with a model connected — key-based, or ``LLM_BACKEND=bedrock`` —
+see ``llm_client.py``). Without a configured backend it fails
+loudly with the setup steps, because the plan step is a real model
+call now and there is no template to fall back to.
 
 What it does, in order:
 
@@ -57,9 +57,10 @@ def main() -> int:
         client = LLMClient()
     except LLMError as error:
         print(f"Cannot run the demo: {error}", file=sys.stderr)
-        print("Set LLM_API_KEY (and optionally LLM_BASE_URL and LLM_MODEL), "
-              "or run with LLM_BACKEND=opencheap-connector "
-              "(or --backend opencheap-connector).", file=sys.stderr)
+        print("Set LLM_API_KEY, LLM_BASE_URL and LLM_MODEL, "
+              "or run with LLM_BACKEND=bedrock and LLM_BEDROCK_MODEL_ID "
+              "set (see \"Connect a model\" in the root README).",
+              file=sys.stderr)
         return 2
 
     with tempfile.TemporaryDirectory() as tmp:

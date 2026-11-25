@@ -10,7 +10,7 @@ covers, so a failing test reads as an architecture regression, not as a
 generic assertion failure.
 
 The live tests at the end need a configured model backend
-(``LLM_API_KEY`` or ``LLM_BACKEND=opencheap-connector``) and exercise
+(see "Connect a model" in the root README) and exercise
 the real model calls: drafting, reviewing, and the free-form loop's
 next-step decision, plus the LangGraph crash/resume cycle and the
 Temporal simulator with a real model. When no backend is configured,

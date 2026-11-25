@@ -20,9 +20,7 @@ derive them from your own traffic and latency budget.
 No API key is needed for the deterministic demo: it drives the breaker
 with a scripted failing provider and a fake clock, so no real waiting
 happens. The live check at the end of this file (``live_demo``) instead
-passes one real model call through the breaker, and needs a configured
-model backend (``LLM_BACKEND=opencheap-connector`` on the author's
-machine, or ``LLM_API_KEY``); it is skipped with a note when no backend
+passes one real model call through the breaker, and needs a configured model backend (see "Connect a model" in the root README -- key-based or AWS Bedrock); it is skipped with a note when no backend
 is configured.
 Run:  python circuit_breaker.py
 """
@@ -198,7 +196,7 @@ def live_demo() -> None:
     This is the proof that the breaker above is not only correct
     against the scripted provider: a healthy real dependency passes
     through untouched, the breaker stays closed, and the call's real
-    token counts are reported. One short call on the cheap route.
+    token counts are reported. One short call on the judge model.
     """
     from llm_client import LLMClient
 
@@ -268,6 +266,7 @@ if __name__ == "__main__":
             live_demo()
         else:
             print("live check skipped: no model backend configured "
-                  "(set LLM_API_KEY, or LLM_BACKEND=opencheap-connector)")
+                  "(connect a model: LLM_API_KEY, LLM_BASE_URL and LLM_MODEL, "
+                  "or LLM_BACKEND=bedrock with LLM_BEDROCK_MODEL_ID)")
     except Exception as exc:  # noqa: BLE001 - the live check must not hide the demo
         print(f"live check failed: {exc}")

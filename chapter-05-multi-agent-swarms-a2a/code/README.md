@@ -1,6 +1,6 @@
 # Code — Chapter 5: Multi-Agent Swarms and Agent-to-Agent Handoffs
 
-Python 3.11 or later. Only the Python standard library is used, so there are no dependencies to install. The deterministic demos need no model API key; the live demo and the live tests need one: set `LLM_API_KEY`, with `LLM_BASE_URL` and `LLM_MODEL` if your provider is not OpenCheap's router and Kimi K3.1 Pro. On the author's machine they also run through the registered OpenCheap connector with `LLM_BACKEND=opencheap-connector`, which authenticates through the Secure Vault without the key entering the process.
+Python 3.11 or later. Only the Python standard library is used, so there are no dependencies to install. The deterministic demos need no model API key; the live demo and the live tests need a configured model backend — see the "Connect a model" section in the root README, which covers the key-based path (`LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`) and the AWS Bedrock path (`LLM_BACKEND=bedrock`, `LLM_BEDROCK_MODEL_ID`).
 
 ## Files
 
@@ -26,13 +26,13 @@ python code/demo_corrupt_handoff.py
 python -m unittest discover -s code -v
 ```
 
-For the live swarm, from the chapter directory:
+For the live swarm, from the chapter directory, with a model connected as described above (key-based shown; for Bedrock, `LLM_BACKEND=bedrock` with `LLM_BEDROCK_MODEL_ID` instead):
 
 ```bash
-LLM_BACKEND=opencheap-connector python code/demo_live_swarm.py
+LLM_API_KEY=<redacted> LLM_BASE_URL=<your provider's API base URL> LLM_MODEL=<your model name> python code/demo_live_swarm.py
 ```
 
-Expected output from the live demo, on the model it was run against (Kimi K3.1 Pro via OpenCheap): the run completes, the sentiment scorer returns a real model verdict, the drafter writes a real reply that still states the verified renewal date of 2026-03-14, every claim carries a provenance of `researcher` or `policy-checker`, and the demo prints the model usage for the run (about 1,000–1,700 tokens, about $0.001–$0.002). Expected test result: the deterministic tests pass, and the live tests pass when a model backend is configured (they skip otherwise).
+Expected output from the live demo, on the configured model: the run completes, the sentiment scorer returns a real model verdict, the drafter writes a real reply that still states the verified renewal date of 2026-03-14, every claim carries a provenance of `researcher` or `policy-checker`, and the demo prints the model usage for the run (about 1,000–1,700 tokens on the model it was run against; the dollar cost depends on the configured model). Expected test result: the deterministic tests pass, and the live tests pass when a model backend is configured (they skip otherwise).
 
 ## A note on determinism — what stays deterministic, and why
 

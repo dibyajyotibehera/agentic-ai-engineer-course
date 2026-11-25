@@ -486,8 +486,9 @@ def _run_demo_d_live() -> None:
     from llm_client import LLMClient  # noqa: PLC0415 - live demo only
 
     if not LLMClient.has_backend():
-        print("Skipped — needs a configured model backend (LLM_API_KEY, or "
-              "LLM_BACKEND=opencheap-connector).")
+        print("Skipped — needs a configured model backend (LLM_API_KEY, "
+              "LLM_BASE_URL and LLM_MODEL, or LLM_BACKEND=bedrock with "
+              "LLM_BEDROCK_MODEL_ID).")
         print()
         return
     from critic_agent import (  # noqa: PLC0415 - live demo only

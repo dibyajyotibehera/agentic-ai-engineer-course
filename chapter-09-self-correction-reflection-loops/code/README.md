@@ -4,12 +4,9 @@ All modules use only the Python standard library, so there are no
 dependencies to install. Python 3.11 or later is required.
 
 Two of the modules call a real language model, and need a configured
-model backend to run their demos: set `LLM_API_KEY`, with
-`LLM_BASE_URL` and `LLM_MODEL` if your provider is not OpenCheap's
-router and Kimi K3.1 Pro. On the author's machine the demos also run
-through the registered OpenCheap connector with
-`LLM_BACKEND=opencheap-connector`, which authenticates through the
-Secure Vault without the key entering the process. Without a backend
+model backend to run their demos — connect a model as described in
+the root README's "Connect a model" section (key-based, or AWS
+Bedrock). Without a backend
 the model-backed demos fail loudly instead of pretending with a
 scripted stand-in. `traceback_parser.py` and the first three demos of
 `loop_watchdog.py` need no model and no key.
@@ -18,7 +15,7 @@ scripted stand-in. `traceback_parser.py` and the first three demos of
 
 | File | What it is |
 | --- | --- |
-| `llm_client.py` | The shared client for an OpenAI-compatible chat API (copied verbatim from Chapter 7, so the chapter is self-contained): environment configuration, retries, structured JSON replies, token and cost totals. |
+| `llm_client.py` | The shared client for a model (copied verbatim from Chapter 7, so the chapter is self-contained): key-based or AWS Bedrock configuration, retries, structured JSON replies, token and cost totals. |
 | `traceback_parser.py` | Parses a raw Python traceback into a structured diagnosis: exception type, deepest user frame, likely cause, suggested fix, and a stable failure signature. Deterministic; no model. |
 | `critic_agent.py` | A maker–checker loop: a real model maker drafts and revises code, a test-suite critic returns a pass/fail verdict with specific findings, and a real model critic gives a second opinion from the same test evidence. The loop acts only on the test suite's verdict. |
 | `self_healing_loop.py` | The full self-healing loop with a real model generator: generate, execute, verify, and stop — with a hard retry budget, exponential backoff, repeat-failure detection, and a fail-closed diagnosis report. |
@@ -31,8 +28,11 @@ scripted stand-in. `traceback_parser.py` and the first three demos of
 ```bash
 python traceback_parser.py
 python loop_watchdog.py
-LLM_BACKEND=opencheap-connector python critic_agent.py
-LLM_BACKEND=opencheap-connector python self_healing_loop.py
+python critic_agent.py
+python self_healing_loop.py
+# Or, on the Bedrock path:
+LLM_BACKEND=bedrock python critic_agent.py
+LLM_BACKEND=bedrock python self_healing_loop.py
 python test_loop_watchdog.py
 python -m unittest test_critic_and_healing test_loop_watchdog -v
 ```
@@ -47,7 +47,7 @@ failure signature), and a missing dependency (unrepairable on the
 first attempt). The watchdog's live demo (d) observes the real critic
 loop and lets the converging repair through with continue verdicts.
 
-Measured on the runs above, on Kimi K3.1 Pro via OpenCheap: the
+Measured on the runs above, on the configured model: the
 critic demo used 1,307 prompt and 1,059 completion tokens ($0.0015),
 the healing demo 936 prompt and 1,275 completion tokens ($0.0016),
 and the watchdog's live demo 344 prompt and 248 completion tokens

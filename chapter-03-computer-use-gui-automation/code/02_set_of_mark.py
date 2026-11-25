@@ -14,11 +14,14 @@ path, and accuracy is reported for both.
 
 Both paths now call a real vision model by default
 (``llm_client.py``, the Chapter 7 client copied into this chapter;
-``LLM_BACKEND=opencheap-connector`` on the author's machine, or
-``LLM_API_KEY`` with your own key). The labelled path sends the
+connect a model as described in "Connect a model" in the root
+README — key-based with ``LLM_API_KEY``, ``LLM_BASE_URL`` and
+``LLM_MODEL``, or ``LLM_BACKEND=bedrock`` with
+``LLM_BEDROCK_MODEL_ID``). The labelled path sends the
 annotated screenshot and asks for a mark number; the raw-coordinate
 path sends the plain screenshot and asks for an (x, y) pair on the
-0-1000 grid. Both calls use the cheap route (``kimi-k3.1-pro:floor``)
+0-1000 grid. Both calls use the configured judge model
+(``LLM_JUDGE_MODEL``, defaulting to the main model)
 with a small token cap, so a full run costs cents. When no backend
 is configured, the script falls back to the deterministic mock
 choosers below — labelled as such — so the exercise still runs with
@@ -42,7 +45,9 @@ Outputs (in code/output/):
 Run:
     pip install -r requirements.txt
     playwright install chromium
-    LLM_BACKEND=opencheap-connector python 02_set_of_mark.py [--mock]
+    LLM_API_KEY=<redacted> LLM_BASE_URL=<your provider's API base URL> LLM_MODEL=<your model name> python 02_set_of_mark.py [--mock]
+    # ... or with AWS Bedrock:
+    LLM_BACKEND=bedrock LLM_BEDROCK_MODEL_ID=<your inference profile ID> python 02_set_of_mark.py [--mock]
 """
 
 from __future__ import annotations
@@ -315,9 +320,10 @@ def choose_with_real_model(annotated_image_path: Path, target: str,
     """Ask a real vision model to pick a mark number from the annotated image.
 
     The prompt is the one the original TODO carried: the model sees the
-    numbered markers and answers with a single integer. The cheap
-    route (``client.judge_model``) is used because selection among
-    visible labels is a short classification, not a reasoning task.
+    numbered markers and answers with a single integer. The
+    configured judge model (``client.judge_model``) is used because
+    selection among visible labels is a short classification, not a
+    reasoning task.
     Returns None when the reply carries no integer.
     """
     prompt = (
@@ -454,20 +460,20 @@ def main() -> int:
         from llm_client import LLMClient
 
         if args.real_model and not LLMClient.has_backend():
-            print("No model backend configured. Set LLM_API_KEY or run "
-                  "with LLM_BACKEND=opencheap-connector.", file=sys.stderr)
+            print("No model backend configured. Connect a model "
+                  "(see \"Connect a model\" in the root README) and "
+                  "re-run.", file=sys.stderr)
             return 2
         if args.real_model or LLMClient.has_backend():
             client = LLMClient()
             use_real = True
     if use_real:
         print("\nGrounding comparison (real vision model, "
-              f"route {client.judge_model}):")
+              f"model {client.judge_model}):")
     else:
         print("\nGrounding comparison (mock chooser, seed "
-              f"{args.seed} — no model backend configured; run with "
-              "LLM_BACKEND=opencheap-connector or LLM_API_KEY set for "
-              "the real-model comparison):")
+              f"{args.seed} — no model backend configured; connect a "
+              "model for the real-model comparison):")
     print(f"  {'target':38s} {'labelled':>9s} {'raw-coord':>10s}")
     rng = random.Random(args.seed)
     labelled_hits = raw_hits = 0

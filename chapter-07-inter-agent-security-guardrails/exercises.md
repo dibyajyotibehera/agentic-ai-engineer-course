@@ -1,6 +1,6 @@
 # Exercises — Chapter 7: Inter-Agent Security & Guardrails
 
-All exercises run in `code/` with only the Python standard library and a model API key: set `LLM_API_KEY` (with `LLM_BASE_URL` and `LLM_MODEL` if your provider is not OpenCheap's router and Kimi K3.1 Pro). The demo runs against a real model, so an attack either works or it does not on this run, and the demo reports what the model actually did rather than asserting a fixed script. The guardrails live outside the model — the harness, proxy, judge, scopes, gate and log — and that is the point: the deterministic tests cover the guardrails without a model, and the live tests cover the model-facing behaviour, skipping when no model backend is configured.
+All exercises run in `code/` with only the Python standard library and a connected model: connect a model first — see "Connect a model" in the root README. The demo runs against a real model, so an attack either works or it does not on this run, and the demo reports what the model actually did rather than asserting a fixed script. The guardrails live outside the model — the harness, proxy, judge, scopes, gate and log — and that is the point: the deterministic tests cover the guardrails without a model, and the live tests cover the model-facing behaviour, skipping when no model backend is configured.
 
 Run the starting point first:
 
@@ -10,7 +10,7 @@ python demo_agent.py
 python -m unittest test_guardrails -v
 ```
 
-On the author's machine the demo shows the vulnerable agent exfiltrating the customer record to the attacker's address, the guarded agent blocking it, and the guarded agent still summarising a clean ticket normally; the test suite passes 13 tests. Those three outcomes are your baseline — if your changes break the clean-ticket case, you have built an off switch, not a guardrail.
+On the author's machine the demo shows the vulnerable agent exfiltrating the customer record to the attacker's address, the guarded agent blocking it, and the guarded agent still summarising a clean ticket normally; the test suite has 28 tests (23 deterministic, 5 live ones that skip without a backend). Those three outcomes are your baseline — if your changes break the clean-ticket case, you have built an off switch, not a guardrail.
 
 ---
 

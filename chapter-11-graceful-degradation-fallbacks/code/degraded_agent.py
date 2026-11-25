@@ -15,9 +15,7 @@ scripted rungs that fail on a fixed schedule, which is the failure
 injection the drill is studied with -- the drill must take the
 primary offline on demand, and no real provider can be taken
 offline on demand. The serving rungs in the live drill (``live_drill``)
-are instead real model calls, and need a configured model backend
-(``LLM_BACKEND=opencheap-connector`` on the author's machine, or
-``LLM_API_KEY``); the live drill is skipped with a note when no
+are instead real model calls, and need a configured model backend (see "Connect a model" in the root README -- key-based or AWS Bedrock); the live drill is skipped with a note when no
 backend is configured. There is no second provider on this backend,
 so the different-provider rung stays scripted even in the live
 drill, and the drill says so -- a second provider would need its
@@ -214,6 +212,7 @@ if __name__ == "__main__":
             live_drill(LLMClient())
         else:
             print("live check skipped: no model backend configured "
-                  "(set LLM_API_KEY, or LLM_BACKEND=opencheap-connector)")
+                  "(connect a model: LLM_API_KEY, LLM_BASE_URL and LLM_MODEL, "
+                  "or LLM_BACKEND=bedrock with LLM_BEDROCK_MODEL_ID)")
     except Exception as exc:  # noqa: BLE001 - the live check must not hide the drill
         print(f"live check failed: {exc}")

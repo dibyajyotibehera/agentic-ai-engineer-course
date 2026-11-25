@@ -1,23 +1,27 @@
 # Exercises — Chapter 8: Human-in-the-Loop & Breakpoints
 
 All exercises run from `code/` with the standard library only. The
-agent runs and the demo need a configured model backend — set
-`LLM_API_KEY` or run with `LLM_BACKEND=opencheap-connector` — because
-the plan step is a real model call and this chapter has no mock
-model. The gate mechanics, the webhook endpoint, and the audit
-exercises need no backend and no chat account. The Slack and Teams
-`post_approval` functions are real delivery calls: they need
-`SLACK_BOT_TOKEN` and `TEAMS_WEBHOOK_URL` respectively, and fail
-loudly without them; `render_local` prints the card JSON so the
-gate can still be reviewed and tested with no account. The simulated
-human clicks in Exercise 4 are real-shaped payloads fed through the
-real interaction handlers — the human is external to the program,
-so the click is supplied as a fixture. Run the demo first so you
-know what "working" looks like:
+agent runs and the demo need a connected model — key-based, with
+`LLM_API_KEY`, `LLM_BASE_URL` and `LLM_MODEL` set, or with
+`LLM_BACKEND=bedrock` and `LLM_BEDROCK_MODEL_ID` set (see "Connect
+a model" in the root README) — because the plan step is a real
+model call and this chapter has no mock model. The gate mechanics,
+the webhook endpoint, and the audit exercises need no backend and
+no chat account. The Slack and Teams `post_approval` functions are
+real delivery calls: they need `SLACK_BOT_TOKEN` and
+`TEAMS_WEBHOOK_URL` respectively, and fail loudly without them;
+`render_local` prints the card JSON so the gate can still be
+reviewed and tested with no account. The simulated human clicks in
+Exercise 4 are real-shaped payloads fed through the real
+interaction handlers — the human is external to the program, so the
+click is supplied as a fixture. Run the demo first so you know what
+"working" looks like:
 
 ```bash
 cd code
-LLM_BACKEND=opencheap-connector python demo_end_to_end.py
+python demo_end_to_end.py
+# ... or with AWS Bedrock:
+LLM_BACKEND=bedrock LLM_BEDROCK_MODEL_ID=... python demo_end_to_end.py
 python -m unittest test_chapter08 -v
 ```
 
@@ -27,10 +31,9 @@ Build on `durable_pause.py`: run an agent that plans a write, pauses
 for approval, and is resumed by a *different* process after the first
 one has exited.
 
-1. Start a run: `LLM_BACKEND=opencheap-connector python
-   durable_pause.py run --task "Publish the weekly changelog"
-   --approver approver@example.com`. Note the run identifier it
-   prints.
+1. Start a run: `python durable_pause.py run --task "Publish the
+   weekly changelog" --approver approver@example.com` (with a model
+   connected, as above). Note the run identifier it prints.
 2. Kill the shell's Python process if it is still running (it should
    already have exited — check that it has), then delete nothing and
    restart nothing yet: confirm with `python durable_pause.py status
@@ -65,7 +68,7 @@ through it, and prove each of its three protections.
 2. Start a run with the webhook pointed at it:
    `APPROVAL_WEBHOOK_URL=http://127.0.0.1:8765/hooks/approval
    HITL_WEBHOOK_SECRET=<the same value>
-   LLM_BACKEND=opencheap-connector python durable_pause.py run
+   python durable_pause.py run
    --task "Publish the weekly changelog"`. Confirm the run reports
    `webhook_delivery: {"delivered": true}`.
 3. Decide over HTTP: sign a decision payload exactly as

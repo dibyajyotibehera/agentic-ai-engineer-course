@@ -1,54 +1,80 @@
-"""A small production-style client for an OpenAI-compatible chat API.
+"""A small production-style client for a model, two ways to connect it.
 
 This is the client every chapter's live example uses when it needs a
 real model. It is deliberately boring: it reads its configuration
-from the environment, posts JSON over HTTPS, retries the failures
-that are worth retrying, and returns the provider's response
-unchanged so the caller can see the token counts and the cost.
+from the environment, calls the model, retries the failures that
+are worth retrying, and returns the provider's response in the
+OpenAI chat-completions shape so the caller can see the token
+counts and the cost.
 
-Configuration (environment variables):
+Connect a model one of two ways, with ``LLM_BACKEND``:
 
-    LLM_BASE_URL    Base URL of the chat API, for example
-                    https://api.opencheap.si/v1. Defaults to OpenCheap.
+Key-based (``LLM_BACKEND=env``, the default) — any OpenAI-compatible
+API. All three of these are required; there is no default provider,
+no default base URL and no default model:
+
     LLM_API_KEY     The key. No default; a missing key is a loud
                     error at call time, not a silent fallback.
+    LLM_BASE_URL    Base URL of the chat API, for example
+                    https://api.example.com/v1.
     LLM_MODEL       The model for agent decisions and summaries.
-                    Defaults to kimi-k3.1-pro.
-    LLM_JUDGE_MODEL The model for guardrail judgements. Defaults to
-                    the cheapest route of the same model,
-                    kimi-k3.1-pro:floor, because a judgement is a
-                    short classification, not a reasoning task.
+    LLM_JUDGE_MODEL The model for guardrail judgements. Optional;
+                    defaults to ``LLM_MODEL``.
     LLM_TIMEOUT     Request timeout in seconds. Defaults to 120.
 
-The client never invents a reply. If the provider is unreachable,
-the key is missing, or the response is not valid JSON, the call
-raises instead of returning a plausible-looking fake. A security
-demo that silently pretends is worse than one that fails loudly.
+AWS Bedrock (``LLM_BACKEND=bedrock``) — the model is called through
+the Amazon Bedrock Converse API instead of over HTTPS, so no API
+key or base URL is involved. Credentials come from the standard
+AWS credential chain (environment variables, ``~/.aws/credentials``,
+or an IAM role); never pass a key to this client. Install the AWS
+SDK first — the key-based backend needs no install, this one does:
 
-Two transports are supported. The default transport posts to
-``LLM_BASE_URL`` with the key from ``LLM_API_KEY``. The
-``opencheap-connector`` transport instead calls the registered
-OpenCheap connector helper, which authenticates through the Secure
-Vault without the key ever entering this process. Select it with
-``LLM_BACKEND=opencheap-connector``; it only exists on the author's
-own machine, where the connector is registered, and it is how this
-chapter's demo is run there. Students use the default transport
-with their own key.
+    pip install boto3
+
+    LLM_BEDROCK_MODEL_ID  The model to call, as an inference
+                    profile ID. Required. Newer Claude models on
+                    Bedrock REQUIRE an inference profile ID, not
+                    the bare model ID — the bare ID fails with
+                    HTTP 400. For example, the Claude Sonnet 4.5
+                    inference profile is
+                    us.anthropic.claude-sonnet-4-5-20250929-v1:0
+                    (bare ID anthropic.claude-sonnet-4-5-20250929-v1:0);
+                    the prefix is the region (us / eu / global).
+    LLM_JUDGE_MODEL The model for guardrail judgements, as a
+                    Bedrock model or inference-profile ID.
+                    Optional; defaults to ``LLM_BEDROCK_MODEL_ID``.
+    AWS_REGION      The AWS region, or ``AWS_DEFAULT_REGION``.
+
+The Bedrock transport translates the same OpenAI-shaped payload
+the key-based transport sends — messages, tools, tool_choice,
+temperature, max_tokens — into a Converse API call, and translates
+the Converse response back into the OpenAI shape the callers
+already expect, so ``chat()``, ``complete()`` and ``structured()``
+behave identically on either backend. One deliberate exception:
+``response_format`` is IGNORED on Bedrock, because the Converse
+API has no equivalent — the instruction to reply in JSON lives in
+the prompt, so a JSON reply is still requested, just not enforced
+by the API. ``LLM_TIMEOUT`` likewise applies to the key-based
+backend only; Bedrock calls use the boto3 defaults.
+
+The client never invents a reply. If the provider is unreachable,
+the configuration is missing, or the response is not valid JSON,
+the call raises instead of returning a plausible-looking fake. A
+security demo that silently pretends is worse than one that fails
+loudly.
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
 from typing import Any, Callable, Optional
 
-DEFAULT_BASE_URL = "https://api.opencheap.si/v1"
-DEFAULT_MODEL = "kimi-k3.1-pro"
-DEFAULT_JUDGE_MODEL = "kimi-k3.1-pro:floor"
 DEFAULT_TIMEOUT = 120
 
 # Retried statuses: rate limits and server-side failures. A 400 or
@@ -56,13 +82,24 @@ DEFAULT_TIMEOUT = 120
 # only spends money twice.
 _RETRYABLE = {429, 500, 502, 503, 504}
 
+# Bedrock Converse error codes worth retrying: throttling and
+# server-side failures. Anything else is a bug in the request or
+# the configuration, and retrying it only spends money twice.
+_RETRYABLE_BEDROCK_CODES = {
+    "ThrottlingException",
+    "Throttling",
+    "ServiceUnavailableException",
+    "InternalServerError",
+    "ModelTimeoutException",
+}
+
 
 class LLMError(RuntimeError):
     """A model call that did not produce a usable reply."""
 
 
 class MissingKeyError(LLMError):
-    """No API key is configured for the default transport."""
+    """Required model configuration is missing."""
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -97,30 +134,277 @@ def _env_transport(base_url: str, api_key: str, timeout: int) -> Callable[[dict]
     return transport
 
 
-def _opencheap_connector_transport() -> Callable[[dict], dict]:
-    """Post a payload through the registered OpenCheap connector.
+# ---------------------------------------------------------------------------
+# Bedrock transport: the same OpenAI-shaped payload, via Converse
+# ---------------------------------------------------------------------------
 
-    The connector helper authenticates with the credential held in
-    the Secure Vault, so the key never enters this process. This
-    transport exists for the author's own machine only.
+_IMAGE_FORMATS = {
+    "image/png": "png",
+    "image/jpeg": "jpeg",
+    "image/jpg": "jpeg",
+    "image/gif": "gif",
+    "image/webp": "webp",
+}
+
+
+def _text_of_content(content: Any) -> str:
+    """Return the text of a message content string or block list."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return ""
+
+
+def _content_blocks(content: Any) -> list[dict]:
+    """Translate an OpenAI message content value to Converse blocks."""
+    if isinstance(content, str):
+        return [{"text": content}] if content else []
+    if not isinstance(content, list):
+        return []
+    blocks: list[dict] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type")
+        if block_type == "text":
+            blocks.append({"text": block.get("text", "")})
+        elif block_type == "image_url":
+            url = (block.get("image_url") or {}).get("url", "")
+            blocks.append(_image_block(url))
+        # Any other block type has no Converse equivalent; dropping
+        # it is safer than inventing a translation for it.
+    return blocks
+
+
+def _image_block(url: str) -> dict:
+    """Translate an image_url block to a Converse image block.
+
+    Only data URIs can be sent: Converse takes raw image bytes, so
+    a remote URL has nothing to send, and fetching it here would
+    silently turn a model call into a network fetch.
     """
-    connector_dir = Path(
-        os.environ.get(
-            "OPENCHEAP_CONNECTOR_DIR",
-            str(Path.home() / "workspace" / "custom-connectors" / "custom.opencheap" / "bin"),
-        )
-    )
-    if not (connector_dir / "client.py").exists():
+    if not url.startswith("data:"):
         raise LLMError(
-            "LLM_BACKEND=opencheap-connector is set but no OpenCheap "
-            f"connector helper exists at {connector_dir / 'client.py'}."
+            "Bedrock image input must be a data URI "
+            "(data:image/png;base64,...); a remote image URL cannot be "
+            f"sent to the Converse API: {url[:120]}"
         )
-    import sys
+    try:
+        header, encoded = url.split(",", 1)
+        mime = header.split(";", 1)[0][len("data:"):]
+        image_format = _IMAGE_FORMATS[mime]
+        raw = base64.b64decode(encoded, validate=True)
+    except (ValueError, KeyError, binascii.Error) as error:
+        raise LLMError(
+            "Bedrock image input must be a data URI with a supported "
+            f"image type (png, jpeg, gif, webp): {url[:120]}"
+        ) from error
+    return {"image": {"format": image_format, "source": {"bytes": raw}}}
 
-    sys.path.insert(0, str(connector_dir))
-    import client as opencheap_client  # noqa: E402
 
-    return lambda payload: opencheap_client.call("/chat/completions", payload)
+def _translate_to_converse(payload: dict) -> dict:
+    """Translate an OpenAI-shaped chat payload to a Converse call."""
+    system: list[dict] = []
+    messages: list[dict] = []
+    for message in payload.get("messages") or []:
+        role = message.get("role")
+        if role == "system":
+            text = _text_of_content(message.get("content"))
+            if text:
+                system.append({"text": text})
+            continue
+        if role == "tool":
+            messages.append({
+                "role": "user",
+                "content": [{
+                    "toolResult": {
+                        "toolUseId": message.get("tool_call_id", ""),
+                        "content": {"text": _text_of_content(message.get("content"))},
+                    }
+                }],
+            })
+            continue
+        if role not in ("user", "assistant"):
+            raise LLMError(f"Bedrock Converse has no role {role!r}.")
+        blocks: list[dict] = []
+        if role == "assistant":
+            blocks.extend(_content_blocks(message.get("content")))
+            for call in message.get("tool_calls") or []:
+                function = call.get("function") or {}
+                try:
+                    arguments = json.loads(function.get("arguments") or "{}")
+                except json.JSONDecodeError as error:
+                    raise LLMError(
+                        "Bedrock tool call arguments were not valid JSON: "
+                        f"{function.get('arguments', '')[:200]}"
+                    ) from error
+                if not isinstance(arguments, dict):
+                    raise LLMError(
+                        "Bedrock tool call arguments must be a JSON object: "
+                        f"{function.get('arguments', '')[:200]}"
+                    )
+                blocks.append({
+                    "toolUse": {
+                        "toolUseId": call.get("id", ""),
+                        "name": function.get("name", ""),
+                        "input": arguments,
+                    }
+                })
+        else:
+            blocks.extend(_content_blocks(message.get("content")))
+        if not blocks:
+            blocks.append({"text": ""})
+        messages.append({"role": role, "content": blocks})
+
+    converse: dict[str, Any] = {
+        "modelId": payload.get("model"),
+        "messages": messages,
+    }
+    if system:
+        converse["system"] = system
+    inference_config: dict[str, Any] = {}
+    if payload.get("max_tokens") is not None:
+        inference_config["maxTokens"] = payload["max_tokens"]
+    if payload.get("temperature") is not None:
+        inference_config["temperature"] = payload["temperature"]
+    if payload.get("top_p") is not None:
+        inference_config["topP"] = payload["top_p"]
+    if inference_config:
+        converse["inferenceConfig"] = inference_config
+    if payload.get("tools") is not None:
+        tools = []
+        for tool in payload["tools"]:
+            function = tool.get("function") or {}
+            parameters = function.get("parameters") or {"type": "object", "properties": {}}
+            tools.append({
+                "toolSpec": {
+                    "name": function.get("name", ""),
+                    "description": function.get("description", ""),
+                    "inputSchema": {"json": parameters},
+                }
+            })
+        tool_config: dict[str, Any] = {"tools": tools}
+        tool_choice = payload.get("tool_choice")
+        if tool_choice is not None:
+            if isinstance(tool_choice, str):
+                if tool_choice == "auto":
+                    tool_config["toolChoice"] = {"auto": {}}
+                elif tool_choice == "none":
+                    tool_config["toolChoice"] = {"none": {}}
+                elif tool_choice == "required":
+                    tool_config["toolChoice"] = {"any": {}}
+                else:
+                    raise LLMError(
+                        f"Bedrock tool_choice {tool_choice!r} has no "
+                        "Converse equivalent; use auto, none or required."
+                    )
+            elif isinstance(tool_choice, dict):
+                function = tool_choice.get("function") or {}
+                tool_config["toolChoice"] = {"tool": {"name": function.get("name", "")}}
+        converse["toolConfig"] = tool_config
+    # response_format is deliberately not translated: the Converse
+    # API has no equivalent, and the JSON instruction lives in the
+    # prompt. See the module docstring.
+    return converse
+
+
+_FINISH_REASONS = {
+    "end_turn": "stop",
+    "tool_use": "tool_calls",
+    "max_tokens": "length",
+}
+
+
+def _translate_from_converse(response: dict) -> dict:
+    """Translate a Converse response back to the OpenAI shape."""
+    output = response.get("output") or {}
+    message = output.get("message") or {}
+    content_blocks = message.get("content") or []
+    text_parts: list[str] = []
+    tool_calls: list[dict] = []
+    for block in content_blocks:
+        if "text" in block:
+            text_parts.append(block["text"])
+        elif "toolUse" in block:
+            tool_use = block["toolUse"]
+            tool_calls.append({
+                "id": tool_use.get("toolUseId", ""),
+                "type": "function",
+                "function": {
+                    "name": tool_use.get("name", ""),
+                    "arguments": json.dumps(tool_use.get("input") or {}),
+                },
+            })
+    reply: dict[str, Any] = {
+        "role": "assistant",
+        "content": "".join(text_parts),
+    }
+    if tool_calls:
+        reply["tool_calls"] = tool_calls
+    stop_reason = response.get("stopReason", "end_turn")
+    usage = response.get("usage") or {}
+    return {
+        "choices": [{
+            "message": reply,
+            "finish_reason": _FINISH_REASONS.get(stop_reason, "stop"),
+        }],
+        "usage": {
+            "prompt_tokens": int(usage.get("inputTokens") or 0),
+            "completion_tokens": int(usage.get("outputTokens") or 0),
+        },
+    }
+
+
+def _bedrock_transport(model_id: str) -> Callable[[dict], dict]:
+    """Call a model through the Amazon Bedrock Converse API.
+
+    boto3 is imported here, and only here, so the key-based backend
+    never needs it. Credentials come from the standard AWS chain;
+    this function takes no key argument of any kind.
+    """
+    try:
+        import boto3
+        from botocore.exceptions import ClientError
+    except ImportError as error:
+        raise LLMError(
+            "LLM_BACKEND=bedrock needs boto3, which is not installed. "
+            "Run: pip install boto3 "
+            "(the key-based backend, LLM_BACKEND=env, needs no install)."
+        ) from error
+    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+    try:
+        client = boto3.client("bedrock-runtime", region_name=region)
+    except Exception as error:  # noqa: BLE001 — boto3 raises several types here
+        raise LLMError(
+            "Could not create the Bedrock client. Set AWS_REGION "
+            f"(or AWS_DEFAULT_REGION) and check the AWS credentials: {error}"
+        ) from error
+
+    def transport(payload: dict) -> dict:
+        converse = _translate_to_converse(payload)
+        # The payload's model is the one to call: the main model, or
+        # the judge model when the caller asked for it. Fall back to
+        # this transport's model only if the payload names none.
+        if not converse.get("modelId"):
+            converse["modelId"] = model_id
+        try:
+            response = client.converse(**converse)
+        except ClientError as error:
+            code = (error.response.get("Error") or {}).get("Code", "")
+            detail = (error.response.get("Error") or {}).get("Message", "")[:500]
+            raise LLMError(
+                f"Bedrock Converse call failed with {code}: {detail}"
+            ) from None
+        except Exception as error:  # noqa: BLE001 — boto3 raises several types here
+            raise LLMError(f"Bedrock Converse call did not complete: {error}") from None
+        return _translate_from_converse(response)
+
+    return transport
 
 
 class LLMClient:
@@ -138,22 +422,56 @@ class LLMClient:
         backend: Optional[str] = None,
     ) -> None:
         backend = backend or os.environ.get("LLM_BACKEND", "env")
-        self.model = model or os.environ.get("LLM_MODEL", DEFAULT_MODEL)
-        self.judge_model = judge_model or os.environ.get("LLM_JUDGE_MODEL", DEFAULT_JUDGE_MODEL)
+        if backend not in ("env", "bedrock"):
+            raise LLMError(
+                f"Unknown LLM_BACKEND={backend!r}. Use LLM_BACKEND=env "
+                "(key-based) or LLM_BACKEND=bedrock."
+            )
+        self.backend = backend
         self.timeout = int(os.environ.get("LLM_TIMEOUT", timeout))
         if transport is not None:
             self._transport = transport
-        elif backend == "opencheap-connector":
-            self._transport = _opencheap_connector_transport()
+            self.model = model or os.environ.get("LLM_MODEL") or os.environ.get("LLM_BEDROCK_MODEL_ID", "")
+            self.judge_model = judge_model or os.environ.get("LLM_JUDGE_MODEL") or self.model
+        elif backend == "bedrock":
+            model_id = model or os.environ.get("LLM_BEDROCK_MODEL_ID")
+            if not model_id:
+                raise MissingKeyError(
+                    "No Bedrock model is configured. Set "
+                    "LLM_BEDROCK_MODEL_ID to an inference profile ID, "
+                    "for example us.anthropic.claude-sonnet-4-5-20250929-v1:0."
+                )
+            self.model = model_id
+            self.judge_model = (
+                judge_model or os.environ.get("LLM_JUDGE_MODEL") or model_id
+            )
+            self._transport = _bedrock_transport(model_id)
         else:
             api_key = api_key or os.environ.get("LLM_API_KEY")
-            if not api_key:
-                raise MissingKeyError(
-                    "No API key is configured. Set LLM_API_KEY, or run "
-                    "with LLM_BACKEND=opencheap-connector on a machine "
-                    "where the OpenCheap connector is registered."
+            base_url = base_url or os.environ.get("LLM_BASE_URL")
+            self.model = model or os.environ.get("LLM_MODEL")
+            missing = [
+                name
+                for name, value in (
+                    ("LLM_API_KEY", api_key),
+                    ("LLM_BASE_URL", base_url),
+                    ("LLM_MODEL", self.model),
                 )
-            base_url = base_url or os.environ.get("LLM_BASE_URL", DEFAULT_BASE_URL)
+                if not value
+            ]
+            if missing:
+                raise MissingKeyError(
+                    "No model is configured for the key-based backend. "
+                    f"Set {', '.join(missing)}"
+                    + (
+                        " (all three of LLM_API_KEY, LLM_BASE_URL and "
+                        "LLM_MODEL are required; there is no default "
+                        "provider, base URL or model)."
+                        if len(missing) > 1
+                        else "."
+                    )
+                )
+            self.judge_model = judge_model or os.environ.get("LLM_JUDGE_MODEL") or self.model
             self._transport = _env_transport(base_url, api_key, self.timeout)
         # Token and cost totals for the demo to report. The provider
         # returns usage on every response; cost is included when the
@@ -165,16 +483,24 @@ class LLMClient:
     @staticmethod
     def has_backend() -> bool:
         """True when a model call can be made from this environment."""
-        if os.environ.get("LLM_API_KEY"):
-            return True
-        if os.environ.get("LLM_BACKEND") == "opencheap-connector":
-            connector_dir = Path(
-                os.environ.get(
-                    "OPENCHEAP_CONNECTOR_DIR",
-                    str(Path.home() / "workspace" / "custom-connectors" / "custom.opencheap" / "bin"),
-                )
+        backend = os.environ.get("LLM_BACKEND", "env")
+        if backend == "bedrock":
+            if not os.environ.get("LLM_BEDROCK_MODEL_ID"):
+                return False
+            try:
+                import boto3
+            except ImportError:
+                return False
+            try:
+                return boto3.Session().get_credentials() is not None
+            except Exception:  # noqa: BLE001 — any credential failure means no backend
+                return False
+        if backend == "env":
+            return bool(
+                os.environ.get("LLM_API_KEY")
+                and os.environ.get("LLM_BASE_URL")
+                and os.environ.get("LLM_MODEL")
             )
-            return (connector_dir / "client.py").exists()
         return False
 
     def _record_usage(self, response: dict) -> None:
@@ -184,6 +510,13 @@ class LLMClient:
         cost = usage.get("cost")
         if isinstance(cost, (int, float)):
             self.total_cost_usd += float(cost)
+
+    @staticmethod
+    def _is_retryable(error: Exception) -> bool:
+        message = str(error)
+        if any(f"HTTP {code}" in message for code in _RETRYABLE):
+            return True
+        return any(code in message for code in _RETRYABLE_BEDROCK_CODES)
 
     def chat(
         self,
@@ -222,9 +555,7 @@ class LLMClient:
             try:
                 response = self._transport(payload)
             except LLMError as error:
-                message = str(error)
-                retryable = any(f"HTTP {code}" in message for code in _RETRYABLE)
-                if not retryable or attempt == 2:
+                if not self._is_retryable(error) or attempt == 2:
                     raise
                 last_error = error
                 time.sleep(delay)
@@ -270,7 +601,11 @@ class LLMClient:
         extracts the first JSON object from the reply text. Raises
         instead of returning a half-parsed object: a guardrail
         judgement with a missing field is a judgement you cannot
-        act on.
+        act on. On the Bedrock backend the JSON format request is
+        ignored by the transport (the Converse API has no
+        equivalent); the instruction to reply in JSON stays in the
+        messages, so the fallback path below is what produces the
+        parseable reply there.
         """
         response = self.chat(
             messages,

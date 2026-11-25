@@ -48,6 +48,31 @@ python scripts/run_checks.py   # every chapter's test suite, one command
 
 To work a chapter, go into its `code/` directory and follow that chapter's README: most chapters run on the standard library alone, and a chapter that needs a package lists it in its own `code/requirements.txt`. Where a chapter needs a model API key (Chapter 7's live demo and tests), the code reads it from the environment and the live tests skip when no key is configured; the deterministic tests need no key. No chapter requires a paid service to complete its core exercise.
 
+### Connect a model
+
+Chapters that call a model read their connection from the environment — there is no default provider and no key bundled with the course. Pick one of two paths:
+
+**Key-based (the default).** Any OpenAI-compatible API works. Set all three — there are no vendor defaults:
+
+```bash
+export LLM_API_KEY=<your key>
+export LLM_BASE_URL=<your provider's API base URL>
+export LLM_MODEL=<your model name>
+```
+
+**AWS Bedrock.** Install the AWS software development kit for Python and point the client at Bedrock:
+
+```bash
+pip install boto3
+export LLM_BACKEND=bedrock
+export LLM_BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-4-5-20250929-v1:0
+export AWS_REGION=us-east-1
+```
+
+Use the inference profile ID from the Bedrock console: the `us` / `eu` / `global` prefix is part of the ID, and the bare model ID (`anthropic.claude-sonnet-4-5-20250929-v1:0`) fails with an HTTP 400 error. Credentials come from the standard AWS credential chain (environment variables, a shared credentials file, or an instance role). On either path the optional `LLM_JUDGE_MODEL` defaults to the main model.
+
+One honesty note: the Bedrock path is implemented against the Bedrock Converse API but was not live-tested against AWS in this environment (no credentials here), while the key-based path is covered by a mock-server test. As noted above, live tests skip when no backend is configured and the deterministic tests need no key.
+
 ## Setup
 
 Python 3.11 or later. Each chapter's `code/` directory lists its own dependencies; most chapters run with nothing more than the standard library plus a small set of packages.

@@ -5,18 +5,17 @@ every failure is injected on a fixed, scripted schedule you can
 inspect. The model tiers are real, though: each file ends with a
 live check that calls the real model through the same code the demo
 exercises, and reports real token counts and real dollars. A live
-check runs only when a model backend is configured — `LLM_API_KEY`,
-or `LLM_BACKEND=opencheap-connector` on the author's machine, where
-the OpenCheap connector authenticates through the Secure Vault and
-no key enters the process. Without a backend, each live check prints
+check runs only when a model backend is configured — connect a model
+first, key-based or AWS Bedrock, as described in "Connect a model"
+in the root README. Without a backend, each live check prints
 a skip note and the deterministic demo still runs. The live checks
-make a handful of short calls on the cheap (`:floor`) route, plus
-two on the full model; the whole chapter's live verification cost
+make a handful of short calls on the cheap (judge) model, plus
+two on the configured model; the whole chapter's live verification cost
 about $0.01.
 
 | File | What it does |
 | --- | --- |
-| `llm_client.py` | The shared real-model client (copied verbatim from Chapter 7): environment configuration, retries on retryable statuses, structured JSON replies, token and cost totals, loud failures on a missing key or a bad response |
+| `llm_client.py` | The shared real-model client (copied verbatim from Chapter 7): key-based or AWS Bedrock configuration, retries on retryable statuses, structured JSON replies, token and cost totals, loud failures on a missing key or a bad response |
 | `circuit_breaker.py` | Circuit breaker with closed / open / half-open states, a fake clock, and a scripted failing provider (Exercise 1); the live check passes one real model call through the breaker |
 | `model_cascade.py` | Model cascade: frontier → cheaper same-provider → different provider → cached answer → refusal, with a cost tally and an evaluation gate (Exercise 2); `LiveRung` calls the real model and reports real dollars, and the live check steps down to it after a scripted frontier 503 |
 | `cost_kill_switch.py` | Metered agent loop with per-run, per-user and global budgets, warning at 80% and a hard stop at 100% (Exercise 3); `LiveModel` drives the same meter with real provider-reported token counts |
@@ -73,10 +72,15 @@ python degraded_agent.py
 python cascade_router.py
 ```
 
-Run the demos with the live checks enabled:
+Run the demos with the live checks enabled (connect a model first —
+see "Connect a model" in the root README):
 
 ```bash
-LLM_BACKEND=opencheap-connector python circuit_breaker.py
+# Key-based (any OpenAI-compatible API):
+LLM_API_KEY=... LLM_BASE_URL=... LLM_MODEL=... python circuit_breaker.py
+
+# ... or with AWS Bedrock:
+LLM_BACKEND=bedrock LLM_BEDROCK_MODEL_ID=... python circuit_breaker.py
 ```
 
 Run the tests, with and without a backend (the live tests skip
@@ -84,7 +88,7 @@ without one):
 
 ```bash
 python test_cascade_router.py
-LLM_BACKEND=opencheap-connector python test_cascade_router.py
+LLM_API_KEY=... LLM_BASE_URL=... LLM_MODEL=... python test_cascade_router.py
 ```
 
 Check that everything compiles:

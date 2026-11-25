@@ -26,9 +26,10 @@ the judge of its own work. That division is what keeps the loop honest:
 execution and verification are the external signals, and the model
 supplies only the next attempt.
 
-Running the demo needs a configured model backend — ``LLM_API_KEY``
-(or ``LLM_BACKEND=opencheap-connector`` on the author's machine, as
-in Chapter 7). Without one it fails loudly instead of pretending
+Running the demo needs a configured model backend — key-based
+(``LLM_API_KEY``, ``LLM_BASE_URL`` and ``LLM_MODEL``) or AWS Bedrock
+(``LLM_BACKEND=bedrock`` with ``LLM_BEDROCK_MODEL_ID``); see the root
+README's "Connect a model" section. Without one it fails loudly instead of pretending
 with a scripted generator. The deterministic behaviour of the loop
 itself — budgets, stopping rules, fail-closed reports — is covered by
 the tests in ``test_critic_and_healing.py``, which drive the loop with
@@ -403,8 +404,8 @@ def main() -> int:
         client = LLMClient()
     except LLMError as error:
         print(f"Cannot run the demo: {error}", file=sys.stderr)
-        print("Set LLM_API_KEY (and optionally LLM_BASE_URL and LLM_MODEL), "
-              "or run with LLM_BACKEND=opencheap-connector.", file=sys.stderr)
+        print("Set LLM_API_KEY, LLM_BASE_URL and LLM_MODEL (key-based), "
+              "or LLM_BACKEND=bedrock with LLM_BEDROCK_MODEL_ID.", file=sys.stderr)
         return 2
 
     print("=== Demo 1: the loop heals itself ===")

@@ -1,6 +1,6 @@
 # Exercises — Chapter 3: Computer Use and GUI Automation
 
-Work in `code/` in this chapter. Nothing here needs a paid service or an API key for its core acceptance criteria: Exercises 2 and 5 call a real vision model by default when a backend is configured (`LLM_BACKEND=opencheap-connector` on the author's machine, or `LLM_API_KEY` with your own key), and fall back to a deterministic chooser — labelled as such in the output — when none is configured, so the exercises still run with no key. Pass `--mock` to force the fallback, `--real-model` to fail loudly instead of falling back. Install the chapter dependencies first:
+Work in `code/` in this chapter. Nothing here needs a paid service or an API key for its core acceptance criteria: Exercises 2 and 5 call a real vision model by default when a model backend is configured (key-based with `LLM_API_KEY`, `LLM_BASE_URL` and `LLM_MODEL`, or `LLM_BACKEND=bedrock` with `LLM_BEDROCK_MODEL_ID` — see "Connect a model" in the root README), and fall back to a deterministic chooser — labelled as such in the output — when none is configured, so the exercises still run with no key. Pass `--mock` to force the fallback, `--real-model` to fail loudly instead of falling back. Install the chapter dependencies first:
 
 ```bash
 pip install -r code/requirements.txt
@@ -37,7 +37,7 @@ playwright install chromium
 
 **Stretch:** shrink the targets — halve the button sizes in the test page — and re-run. Record how the raw-coordinate accuracy degrades faster than the labelled accuracy, and note the target size at which the labelled path starts to fail too. That threshold is the number you would carry into a production grounding budget.
 
-**Real-model note:** the real-model call is implemented, not a TODO: `choose_with_real_model()` and `guess_raw_coordinates_with_real_model()` in `code/02_set_of_mark.py` send the annotated and plain screenshots to the model through `code/llm_client.py` (the Chapter 7 client, plus one image method), on the cheap route with a small token cap — a full run measured about $0.003. Keep the mock results alongside the real ones so the comparison stays honest: run once with `--mock` and once with a backend configured, and record both tables.
+**Real-model note:** the real-model call is implemented, not a TODO: `choose_with_real_model()` and `guess_raw_coordinates_with_real_model()` in `code/02_set_of_mark.py` send the annotated and plain screenshots to the model through `code/llm_client.py` (the Chapter 7 client, plus one image method), using the configured model with a small token cap — a full run measured about $0.003. Keep the mock results alongside the real ones so the comparison stays honest: run once with `--mock` and once with a backend configured, and record both tables.
 
 ## Exercise 3 — Screenshot diffing: detect what changed (Intermediate)
 

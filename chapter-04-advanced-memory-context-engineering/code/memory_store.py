@@ -31,13 +31,11 @@ Design rules enforced by this module, not left to convention:
 Embeddings here are a deterministic stand-in, not a real embedding model:
 :func:`fake_embed` hashes the text into a fixed-length vector so that
 similar texts get similar vectors well enough for the exercises to behave.
-That stand-in stays deliberately, and the reason is verified, not assumed:
-the OpenCheap router this course runs against lists only the chat model
-``kimi-k3.1-pro`` (``list-models`` returns one model, kind ``chat``), and
-its ``/embeddings`` endpoint answers 404, so there is no cheap real
-embedding model available to this chapter in this environment, and no
-local embedding model is installed here either. The stand-in is therefore
-the honest offline default, and it is never presented as an embedding:
+That stand-in stays deliberately: no embedding model is configured for
+this chapter, so there is no real embedding model for the store to call,
+and no local embedding model is installed here either. The stand-in is
+therefore the honest offline default, and it is never presented as an
+embedding:
 it is named ``fake_embed``, and every similarity threshold tuned for it
 says so in its comment. The single swap point is :func:`embed_text`:
 pass a real embedding callable to ``MemoryStore(embedder=...)`` and

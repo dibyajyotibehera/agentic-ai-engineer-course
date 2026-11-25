@@ -8,8 +8,9 @@ or from inside code/ with:
 
     python3 test_compaction.py
 
-The live tests at the end need a configured model backend
-(``LLM_API_KEY`` or ``LLM_BACKEND=opencheap-connector``). When no
+The live tests at the end need a connected model (key-based, the
+default, or ``LLM_BACKEND=bedrock`` — see "Connect a model" in the
+root README). When no
 backend is configured they skip instead of failing: a skipped live
 test means "not run", not "passed". The live tests cover the
 model-facing behaviour -- real model compaction preserving the

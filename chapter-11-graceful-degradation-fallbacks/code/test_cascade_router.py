@@ -8,9 +8,7 @@ Standard library only.  Run from the code/ directory:
 Every number here is a worked example from the simulated pool in
 cascade_router.py -- illustrative prices and scripted quality scores,
 not real vendor prices or measured results. The deterministic tests
-below need no model. The live tests at the end need a configured
-model backend (``LLM_BACKEND=opencheap-connector`` on the author's
-machine, or ``LLM_API_KEY``); like Chapter 7's live tests, they skip
+below need no model. The live tests at the end need a configured model backend (see "Connect a model" in the root README -- key-based or AWS Bedrock); like Chapter 7's live tests, they skip
 instead of failing when no backend is configured.
 """
 

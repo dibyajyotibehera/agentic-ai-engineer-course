@@ -5,11 +5,10 @@ grading, golden DAGs, distance metrics, the CI gate and the
 faithfulness arithmetic — runs offline, with no model, no network
 connection, and no API key. The live path is the exception: the
 real judge (`LLMJudge`), the real claim checker
-(`LLMClaimChecker`), and `demo_live.py` need a configured model
-backend, either your own key (`LLM_API_KEY`) or
-`LLM_BACKEND=opencheap-connector` on a machine where the OpenCheap
-connector is registered. The live tests in `test_trajectory.py`
-skip when no backend is configured.
+(`LLMClaimChecker`), and `demo_live.py` need a connected model —
+see "Connect a model" in the root README, then run the demo
+key-based or with AWS Bedrock as shown below. The live tests in
+`test_trajectory.py` skip when no backend is configured.
 
 ## Run the eval suite and the gate
 
@@ -29,7 +28,11 @@ Exercise 5 in `../exercises.md` for the fix.
 ## Run the live demo (one real judge grade, one real claim check)
 
 ```bash
-LLM_BACKEND=opencheap-connector python demo_live.py
+# Key-based (any OpenAI-compatible API):
+LLM_API_KEY=<redacted> LLM_BASE_URL=<your provider's API base URL> LLM_MODEL=<your model name> python demo_live.py
+
+# ... or with AWS Bedrock:
+LLM_BACKEND=bedrock LLM_BEDROCK_MODEL_ID=<your inference profile ID> python demo_live.py
 ```
 
 This grades the golden refund trajectory and the ordering-error
@@ -39,8 +42,6 @@ As run on 22 November 2026: the judge passed the golden run and
 failed the ordering-error run for refunding before the eligibility
 check, the claim checker scored the worked example at 0.5, and the
 whole demo cost $0.0032 (1,426 prompt + 301 completion tokens).
-Students with their own key run `LLM_API_KEY=... python demo_live.py`
-instead.
 
 ## Run the tests
 

@@ -9,11 +9,11 @@ tests are test fixtures with small round numbers, labelled as such
 in the test names; they are not teardown numbers.
 
 The live tests at the end need a configured model backend
-(``LLM_API_KEY`` or ``LLM_BACKEND=opencheap-connector``) and run the
-real copilot: plan and draft calls to the model, four local tools,
-and a judge call on the cheap route. When no backend is configured
-they skip instead of failing: a skipped live test means "not run",
-not "passed".
+(a key-based backend or Bedrock — see "Connect a model" in the root
+README) and run the real copilot: plan and draft calls to the model,
+four local tools, and a judge call on the configured judge model.
+When no backend is configured they skip instead of failing: a
+skipped live test means "not run", not "passed".
 """
 
 from __future__ import annotations

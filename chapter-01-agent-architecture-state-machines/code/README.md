@@ -25,12 +25,20 @@ Pass `--live` to `01_dag_vs_cycle.py` (`run`, `crash`, `resume` in
 by a real model call: drafts are written by a real model, drafts are
 judged by a real model acting as reviewer, and in the free-form loop the
 next step is chosen by a real model at every step. The live run needs a
-configured model backend — set `LLM_API_KEY`, with `LLM_BASE_URL` and
-`LLM_MODEL` if your provider is not OpenCheap's router and Kimi K3.1
-Pro. On the author's machine the demos also run through the registered
-OpenCheap connector with `LLM_BACKEND=opencheap-connector`, which
-authenticates through the Secure Vault without the key entering the
-process. Each live run prints its token and cost totals at the end; the
+configured model backend — see "Connect a model" in the root README.
+Key-based, for example:
+
+```bash
+LLM_API_KEY=<your key> LLM_BASE_URL=<your provider's API base URL> LLM_MODEL=<your model name> python 01_dag_vs_cycle.py --live
+```
+
+Or on AWS Bedrock:
+
+```bash
+LLM_BACKEND=bedrock LLM_BEDROCK_MODEL_ID=<your inference profile ID> AWS_REGION=<your region> python 01_dag_vs_cycle.py --live
+```
+
+Each live run prints its token and cost totals at the end; the
 full live run of `01` costs about a cent, and the whole chapter's live
 tests cost a few cents. A live run takes minutes rather than seconds —
 each model call takes several seconds — which is itself a property of
@@ -53,7 +61,7 @@ simulator is a stand-in for the server, not for the work.
 | `02_langgraph_checkpoint_resume.py` | A cyclic LangGraph workflow with SQLite checkpointing: crash mid-run, resume the same thread in a fresh process, list the checkpoint history. `--live` uses a real model for drafting and reviewing |
 | `03_state_serialisation.py` | Versioned, small, secret-free state: JSON round-trip, V1-to-V2 migration, the claim-check pattern against a real file-backed blob store |
 | `04_temporal_workflow.py` | The same triage job as a Temporal workflow, plus a local event-log simulator. `simulate` is deterministic by default and `--live` records real model results; `worker` / `start` run against a real server and always use the real model |
-| `llm_client.py` | A small production-style client for an OpenAI-compatible chat API, copied verbatim from Chapter 7 so this chapter is self-contained: environment configuration, retries, structured JSON replies, token and cost totals |
+| `llm_client.py` | A small production-style client for a model, copied verbatim from Chapter 7 so this chapter is self-contained: key-based (any OpenAI-compatible API) or AWS Bedrock, environment configuration, retries, structured JSON replies, token and cost totals |
 | `live_review.py` | The chapter's only model-facing module: drafting, reviewing, and next-step decisions as real model calls, shared by the three demos |
 | `receipt_ledger.py` | The receipt ledger: a real JSON-lines file (`receipts.jsonl`) that makes sending a receipt idempotent by key |
 | `test_chapter01.py` | Deterministic tests (no model, no network) plus live tests that skip without a configured model backend |

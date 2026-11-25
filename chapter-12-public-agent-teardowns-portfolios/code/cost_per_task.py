@@ -18,15 +18,13 @@ for tests or for pricing a trace recorded elsewhere — but a trace
 built by hand is labelled as such wherever it is printed, and it is
 not a teardown number.
 
-Pricing: the default prices are Moonshot's published list prices for
-Kimi K3.1 Pro ($2.00 input / $10.00 output per million tokens, read
-October 2026; see references.md), which is the model the live runs
-use. The judge runs on the cheap ``:floor`` route, which costs less
-than the list price, so the evaluation line priced at list is an
-upper bound, not an exact figure. Set ``LLM_INPUT_PRICE_PER_MILLION``
-and ``LLM_OUTPUT_PRICE_PER_MILLION`` to price at your own router's
-rates instead, and check the provider's price page before publishing:
-per-token prices change.
+Pricing: the default prices are $2.00 input / $10.00 output per million
+tokens for the configured model. The judge runs on the configured judge
+model (``LLM_JUDGE_MODEL``, defaulting to the main model), so the
+evaluation line is priced at the same default rates. Set
+``LLM_INPUT_PRICE_PER_MILLION`` and ``LLM_OUTPUT_PRICE_PER_MILLION``
+to price at your own provider's rates instead, and check the provider's
+price page before publishing: per-token prices change.
 
 Two reference figures are printed by the demo, exactly as verified for this
 chapter (see README.md and references.md). They are constants, not computed
@@ -45,8 +43,10 @@ values, because they come from published studies and documentation:
   about 783,000 input tokens, about $1.61 on Claude Sonnet 5.5 at list
   prices.
 
-Usage:
-    LLM_BACKEND=opencheap-connector python cost_per_task.py
+Usage (with a model backend configured — see "Connect a model" in the
+root README):
+    LLM_API_KEY=<key> LLM_BASE_URL=<base URL> LLM_MODEL=<model> python cost_per_task.py
+    LLM_BACKEND=bedrock LLM_BEDROCK_MODEL_ID=<inference profile ID> python cost_per_task.py
 """
 
 from __future__ import annotations
@@ -77,9 +77,8 @@ SCREENSHOT_TOKENS_HIGH = 1_800
 COMPUTER_USE_30_STEP_INPUT_TOKENS = 783_000
 COMPUTER_USE_30_STEP_COST_USD = 1.61  # Claude Sonnet 5.5, list prices
 
-# Moonshot list prices for Kimi K3.1 Pro, USD per million tokens
-# (platform.kimi.ai pricing, October 2026). Override from the
-# environment to price at your router's actual rates.
+# Default prices, USD per million tokens. Override from the
+# environment to price at your provider's actual rates.
 
 
 @dataclass
@@ -99,16 +98,20 @@ class ModelPricing:
 
 
 def default_pricing() -> ModelPricing:
-    """Pricing for the live runs: Moonshot list, or env overrides."""
+    """Pricing for the live runs: defaults, or env overrides."""
     return ModelPricing(
-        name=os.environ.get("LLM_MODEL", "kimi-k3.1-pro"),
+        name=(
+            os.environ.get("LLM_MODEL")
+            or os.environ.get("LLM_BEDROCK_MODEL_ID")
+            or "configured model"
+        ),
         input_per_million=float(os.environ.get("LLM_INPUT_PRICE_PER_MILLION", 2.00)),
         output_per_million=float(os.environ.get("LLM_OUTPUT_PRICE_PER_MILLION", 10.00)),
     )
 
 
-# The pricing the live demo uses (Moonshot list prices, see above).
-KIMI_PRICING = default_pricing()
+# The pricing the live demo uses (default prices, see above).
+DEFAULT_PRICING = default_pricing()
 
 
 @dataclass
@@ -373,8 +376,8 @@ def format_attribution_rollup(rollup: dict[str, float | str | int]) -> str:
 
 def main() -> None:
     # Live run: three tickets through the real copilot (nine model
-    # calls). Prices are Moonshot's list prices for Kimi K3.1 Pro
-    # unless LLM_INPUT/OUTPUT_PRICE_PER_MILLION override them.
+    # calls). Prices are the defaults above unless
+    # LLM_INPUT/OUTPUT_PRICE_PER_MILLION override them.
     client = LLMClient()  # raises loudly without a configured backend
     pricing = default_pricing()
     runs = [run_copilot(client, ticket) for ticket in TICKETS[:3]]
@@ -384,8 +387,8 @@ def main() -> None:
     print("=" * 64)
     print(f"Pricing: {pricing.name} at ${pricing.input_per_million:.2f} input / "
           f"${pricing.output_per_million:.2f} output per million tokens "
-          "(Moonshot list prices; judge line is an upper bound — the "
-          "judge runs on the cheaper :floor route).")
+          "(defaults; override with LLM_INPUT_PRICE_PER_MILLION / "
+          "LLM_OUTPUT_PRICE_PER_MILLION).")
     print("Memory tokens are estimated by character share of the draft "
           "prompt (see copilot.py); model and judge tokens are measured.")
     for trace, run in zip(traces, runs):
@@ -408,7 +411,7 @@ def main() -> None:
     print(
         f"Model usage for this run: {client.total_prompt_tokens} prompt "
         f"tokens, {client.total_completion_tokens} completion tokens"
-        + (f", ${client.total_cost_usd:.4f} (router-reported)"
+        + (f", ${client.total_cost_usd:.4f} (provider-reported)"
            if client.total_cost_usd else "")
     )
     print()

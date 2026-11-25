@@ -11,7 +11,8 @@ deterministic test names the behaviour it covers, so a failing test
 reads as a loop regression, not as a generic assertion failure.
 
 The live tests at the end need a configured model backend
-(``LLM_API_KEY`` or ``LLM_BACKEND=opencheap-connector``). When no
+(``LLM_API_KEY``, ``LLM_BASE_URL`` and ``LLM_MODEL``, or
+``LLM_BACKEND=bedrock`` with ``LLM_BEDROCK_MODEL_ID``). When no
 backend is configured they skip instead of failing: a skipped live
 test means "not run", not "passed".
 """

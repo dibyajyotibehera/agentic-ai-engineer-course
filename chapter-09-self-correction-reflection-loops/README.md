@@ -706,8 +706,10 @@ self-contained, plus the four below). The loop's logic is what this
 chapter teaches, but the model calls inside it are real: the maker in
 `critic_agent.py` and the generator in `self_healing_loop.py` call a
 language model through `llm_client.py`, so those two demos need a
-configured model backend — set `LLM_API_KEY`, or run with
-`LLM_BACKEND=opencheap-connector` on the author's machine — and fail
+configured model backend — key-based (`LLM_API_KEY`, `LLM_BASE_URL`,
+`LLM_MODEL`) or AWS Bedrock (`LLM_BACKEND=bedrock`,
+`LLM_BEDROCK_MODEL_ID`); see the root README's "Connect a model"
+section — and fail
 loudly without one instead of pretending with a scripted stand-in.
 `traceback_parser.py` and the first three demos of `loop_watchdog.py`
 need no model and no key. `traceback_parser.py` turns
@@ -744,7 +746,7 @@ loop is stopped on its third attempt, and a ping-pong delegation is
 stopped on its fifth attempt after two full delegation cycles, and its
 live demo watches the real critic loop's repair earn continue verdicts
 on both rounds. The whole chapter's live behaviour costs a few tenths
-of a cent per run on the cheap model route (the critic demo $0.0015,
+of a cent per run on the configured model (the critic demo $0.0015,
 the healing demo $0.0016, the watchdog's live demo $0.0003 on the runs
 above). The exercises then ask you to rebuild each piece
 yourself, with the model plugged in for real, and to prove the termination

@@ -43,9 +43,10 @@ from __future__ import annotations
 
 from llm_client import LLMClient
 
-# The judge grades on the cheap route of the same model: a verdict is
-# a short classification, not a reasoning task. The budget is kept
-# generous anyway, because this model spends a large share of its
+# The judge grades on the configured judge model (LLM_JUDGE_MODEL,
+# defaulting to the main model): a verdict is a short
+# classification, not a reasoning task. The budget is kept
+# generous anyway, because a model can spend a large share of its
 # token budget on hidden reasoning and a small budget can come back
 # empty — the verdict itself is only a few dozen tokens.
 _JUDGE_MAX_TOKENS = 2000
@@ -117,11 +118,13 @@ class LLMJudge:
 
     It uses the shared client from ``llm_client.py`` — the same client
     Chapter 7's guardrails use — so it reads its configuration from
-    the environment (``LLM_API_KEY`` / ``LLM_BASE_URL`` / ``LLM_MODEL``,
-    or ``LLM_BACKEND=opencheap-connector`` on a machine where the
-    OpenCheap connector is registered) and raises a clear error when
-    no backend is configured instead of silently grading nothing.
-    The judge grades on the cheap ``:floor`` route, temperature zero,
+    the environment (key-based: ``LLM_API_KEY`` / ``LLM_BASE_URL`` /
+    ``LLM_MODEL``; or AWS Bedrock: ``LLM_BACKEND=bedrock`` with
+    ``LLM_BEDROCK_MODEL_ID`` — see "Connect a model" in the root
+    README) and raises a clear error when no backend is configured
+    instead of silently grading nothing.
+    The judge grades on the configured judge model (``LLM_JUDGE_MODEL``,
+    defaulting to the main model), temperature zero,
     and returns a JSON verdict with a label, a score and a rationale.
 
     The judge model should be pinned by exact model id, and it should

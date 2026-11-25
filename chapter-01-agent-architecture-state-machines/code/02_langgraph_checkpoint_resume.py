@@ -25,8 +25,9 @@ Pass ``--live`` to any of the ``run``, ``crash`` or ``resume`` commands
 and the stand-ins are replaced by real model calls: the draft node
 writes a real reply with a real model and the review node judges it with
 a real model (``live_review.py``). The live run needs a configured model
-backend — ``LLM_API_KEY`` or ``LLM_BACKEND=opencheap-connector`` on a
-machine where the OpenCheap connector is registered — and it prints the
+backend — key-based with ``LLM_API_KEY``, ``LLM_BASE_URL`` and
+``LLM_MODEL``, or AWS Bedrock with ``LLM_BACKEND=bedrock``; see
+"Connect a model" in the root README — and it prints the
 token and cost totals at the end. The reviewer's verdict is stored in
 state, so the conditional edge routes on the recorded verdict rather
 than calling the model a second time, and a resumed run re-runs only the
@@ -372,7 +373,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--live", action="store_true",
         help="use a real model for drafting and reviewing "
-             "(needs LLM_API_KEY or LLM_BACKEND=opencheap-connector)")
+             "(needs a configured model backend; see \"Connect a model\" "
+             "in the root README)")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("run", "resume", "history"):
         p = sub.add_parser(name)
@@ -380,7 +382,8 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument(
             "--live", action="store_true", default=argparse.SUPPRESS,
             help="use a real model for drafting and reviewing "
-                 "(needs LLM_API_KEY or LLM_BACKEND=opencheap-connector)")
+                 "(needs a configured model backend; see \"Connect a model\" "
+             "in the root README)")
     p = sub.add_parser("crash")
     p.add_argument("--thread", default="demo-1")
     p.add_argument("--after", type=int, default=2,
@@ -388,7 +391,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--live", action="store_true", default=argparse.SUPPRESS,
         help="use a real model for drafting and reviewing "
-             "(needs LLM_API_KEY or LLM_BACKEND=opencheap-connector)")
+             "(needs a configured model backend; see \"Connect a model\" "
+             "in the root README)")
     args = parser.parse_args(argv)
     if args.command == "crash":
         return cmd_crash(args.thread, args.after, live=args.live)

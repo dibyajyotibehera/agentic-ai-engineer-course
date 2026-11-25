@@ -548,7 +548,7 @@ class LLMWorker(Worker):
     Subclasses implement ``prompt_for`` (the messages to send) and
     ``parse_reply`` (the JSON object to the typed payload). The two
     concrete workers are ``ModelSentimentWorker`` (a judgement, so it
-    uses the cheap ``:floor`` judge route) and ``ModelDrafterWorker``
+    uses the judge model, ``LLM_JUDGE_MODEL``) and ``ModelDrafterWorker``
     (prose, so it uses the full model). Pass a client in, or leave it
     out and one is built from the environment — which raises loudly
     when no key or backend is configured, instead of silently
@@ -612,8 +612,8 @@ class ModelSentimentWorker(LLMWorker):
     """The sentiment scorer, backed by a real model judgement.
 
     The deterministic ``SentimentWorker`` scores tone with keyword
-    lists; this worker asks the model instead, on the cheap judge
-    route (``LLM_JUDGE_MODEL``, ``kimi-k3.1-pro:floor`` by default),
+    lists; this worker asks the model instead, on the judge model
+    (``LLM_JUDGE_MODEL``, which defaults to the main model),
     because sentiment is a short classification, not a reasoning
     task. The reply must be a JSON object with a ``score`` between
     0.0 and 1.0 and a ``label`` from the allowed set, and the typed
